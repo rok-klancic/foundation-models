@@ -1,4 +1,4 @@
-# Foundation Models for Time Series Research
+# Foundation Models for Time Series
 
 ## Overview
 
