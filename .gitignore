@@ -167,3 +167,4 @@ notebooks/lightning_logs/
 notebooks/m3/
 notebooks/weather.csv
 *.db
+data/interim/slovenia_map.html
