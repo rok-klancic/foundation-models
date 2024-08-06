@@ -168,3 +168,8 @@ notebooks/m3/
 notebooks/weather.csv
 *.db
 data/interim/slovenia_map.html
+data/interim/watercourse_by_stations.joblib
+notebooks/aquifer_by_stations.joblib
+notebooks/chronos_large_results.joblib
+notebooks/chronos_tiny_results.joblib
+notebooks/columns.txt
