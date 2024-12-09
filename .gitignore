@@ -193,3 +193,6 @@ reports/figures
 reports/gradient-boosting
 reports/linear-regression
 reports/randomforest
+.gitattributes
+foundation_models/
+times_venv/
