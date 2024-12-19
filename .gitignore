@@ -196,3 +196,4 @@ reports/randomforest
 .gitattributes
 foundation_models/
 times_venv/
+data/external/
