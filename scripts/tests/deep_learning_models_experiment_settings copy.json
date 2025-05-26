@@ -1,0 +1,34 @@
+{
+    "n-beats": {
+        "model_name": "n_beats",
+        "additional_features": false,
+        "test_len": 20,
+        "val_len": 20,
+        "validation_size": 60,
+        "horizon_max": 2,
+        "target_feature": "altitude_diff",
+        "aquifers_list": [85065]
+    },
+
+    "patch-tst": {
+        "model_name": "patchtst",
+        "additional_features": false,
+        "test_len": 20,
+        "val_len": 20,
+        "validation_size": 60,
+        "horizon_max": 2,
+        "target_feature": "altitude_diff",
+        "aquifers_list": [85065]
+    },
+
+    "deear": {
+        "model_name": "deepar",
+        "additional_features": false,
+        "test_len": 20,
+        "val_len": 20,
+        "validation_size": 60,
+        "horizon_max": 2,
+        "target_feature": "altitude_diff",
+        "aquifers_list": [85065]
+    }
+}

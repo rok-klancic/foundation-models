@@ -1,0 +1,315 @@
+# IMPORT THE NECESSARY LIBRARIES
+# ----------------------------------------------------------------------------------------------------------------------
+import joblib
+import pandas as pd
+import numpy as np
+import seaborn as sns
+from sklearn.metrics import r2_score
+from sklearn.model_selection import BaseCrossValidator
+from sklearn.base import BaseEstimator
+from sklearn.preprocessing import StandardScaler
+import matplotlib.pyplot as plt
+import optuna
+import json
+# RandomForest
+from sklearn.ensemble import RandomForestRegressor
+# GradientBoostingRegressor
+from sklearn.ensemble import GradientBoostingRegressor
+from sklearn.ensemble import HistGradientBoostingRegressor
+# GAFeatureSelectionCV
+from sklearn.model_selection import TimeSeriesSplit
+from sklearn_genetic import GAFeatureSelectionCV
+from sklearn_genetic.plots import plot_fitness_evolution
+# Decision Tree
+from sklearn.tree import DecisionTreeRegressor
+# Linear Regression
+from sklearn.linear_model import LinearRegression
+
+
+# HYPERPARAMETER TUNING
+# ----------------------------------------------------------------------------------------------------------------------
+def hyperparameter_tuning(model_name, horizon_max, aquifers_list, best_features, target_feature, val_len, test_len, aquifer_by_stations):
+    def objective(trial):
+        if model_name == 'random_forest':
+            n_estimators = trial.suggest_int('n_estimators', 10, 500)
+            max_depth = trial.suggest_categorical('max_depth', [None, 10, 20, 30, 50])
+            max_features = trial.suggest_categorical('max_features', ["sqrt", "log2", 0.5, 1.0])
+    
+            # Initialize the RandomForestClassifier
+            model = RandomForestRegressor(n_estimators=n_estimators,
+                                        max_depth=max_depth,
+                                        max_features=max_features,
+                                        n_jobs=-1,
+                                        random_state=42)
+        elif model_name == 'gradient_boosting':
+            #n_estimators = trial.suggest_int('n_estimators', 10, 500)
+            max_iter = trial.suggest_int('max_iter', 10, 500)
+            max_depth = trial.suggest_categorical('max_depth', [None, 10, 20, 30, 50])
+            #max_features = trial.suggest_categorical('max_features', ["sqrt", "log2", 0.5, 1.0])
+            max_features = trial.suggest_categorical('max_features', [0.5, 0.75, 1.0])
+            learning_rate = trial.suggest_categorical('learning_rate', [0.01, 0.05, 0.1, 0.2])
+            
+            
+            # Initialize the RandomForestClassifier
+            '''model = GradientBoostingRegressor(n_estimators=n_estimators,
+                                          max_depth=max_depth,
+                                          max_features=max_features,
+                                          random_state=42)'''
+            model = HistGradientBoostingRegressor(max_iter=max_iter, 
+                                                  max_depth=max_depth,
+                                                  max_features=max_features,
+                                                  learning_rate=learning_rate,
+                                                  random_state=42)
+            
+        else:
+            raise ValueError(f"Model {model_name} not supported for hyperparameter tuning")
+        
+        # List for r2 results for different prediction horizons
+        r2_scores = [[] for _ in range(horizon_max)]
+        
+        for aquifer in aquifers_list:
+        
+            for horizon in range (1, horizon_max+1, 1):
+                # Define the train and test set
+                X_train = aquifer_by_stations[aquifer][best_features[f'horizon_{horizon}']][:-(val_len + horizon + test_len)]
+                y_train = aquifer_by_stations[aquifer][target_feature][horizon:-(val_len + test_len)]
+        
+                X_test = aquifer_by_stations[aquifer][best_features[f'horizon_{horizon}']][-(val_len + horizon + test_len):-(horizon + test_len)]
+                y_test = aquifer_by_stations[aquifer][target_feature][-(val_len + test_len):-test_len]
+        
+                # Train the model
+                model.fit(X_train, y_train)
+        
+                # Make predictions
+                forecast = model.predict(X_test).tolist()
+                
+                # Calculate and save the r2 score
+                r2_scores[horizon-1].append(r2_score(y_test, forecast))
+        
+        # Calculate the average r2 score
+        r2_average =  []
+        
+        for i in range(horizon_max):
+            r2_average.append(np.mean(r2_scores[i]))
+    
+        # Set the loss as average of average r2 scores for different prediction horizons
+        loss = np.mean(r2_average)
+    
+        return loss
+    
+    # Run the optuna
+    study = optuna.create_study(direction='maximize')
+    study.optimize(objective, n_trials=30)
+
+    # Return the best parameters
+    return study.best_params
+
+
+# FEATURE SELECTION
+# ----------------------------------------------------------------------------------------------------------------------
+# Time series split class
+class Last365TimeSeriesSplit(BaseCrossValidator):
+    def __init__(self, n_splits, test_size):
+        self.n_splits = n_splits
+        self.test_size = test_size
+
+    def get_n_splits(self, X=None, y=None, groups=None):
+        return self.n_splits
+
+    def split(self, X, y=None, groups=None):
+        n_samples = len(X)
+        indices = np.arange(n_samples)
+        test_start = n_samples - self.test_size
+        train_indices = indices[:test_start]
+        test_indices = indices[test_start:]
+        yield train_indices, test_indices
+
+def feature_selection(model_name, aquifer, test_len, val_len, horizon_max, target_feature, aquifer_by_stations):
+    # Initialize model
+    if model_name == 'linear_regression':
+        model = LinearRegression(n_jobs=-1)
+    elif model_name == 'random_forest':
+        model = RandomForestRegressor(n_jobs=-1, random_state=42)
+    elif model_name == 'gradient_boosting':
+        #model = GradientBoostingRegressor(random_state=42)
+        model = HistGradientBoostingRegressor(random_state=42)
+    else:
+        raise ValueError(f"Model {model_name} not supported for feature selection")
+    
+    # Dictionary to store the best features
+    best_features = {}
+    for horizon in range(1, horizon_max + 1):
+        best_features[f'horizon_{horizon}'] = []
+    
+    for horizon in range(1, horizon_max+1):
+        X_train = aquifer_by_stations[aquifer][:-(test_len + horizon)].drop(columns=['date', 'station_id', 'id', 'location_id'])
+        y_train = aquifer_by_stations[aquifer][target_feature][horizon:-(test_len)]
+    
+        # Initialize genetic algorithm feature selector with max_features set
+        gafs = GAFeatureSelectionCV(
+            estimator=model,
+            cv=Last365TimeSeriesSplit(n_splits=1, test_size=val_len),
+            scoring='r2',
+            population_size=100,
+            generations=25,
+            n_jobs=-1,
+            verbose=True,
+            keep_top_k=5,
+            elitism=True,
+            max_features=40,  # Set the maximum number of features to select
+            mutation_probability=0.2,
+            crossover_probability=0.8
+        )
+    
+        # Fit the feature selector
+        gafs.fit(X_train, y_train)
+        best_features[f'horizon_{horizon}'] = list(gafs.get_feature_names_out(X_train.columns))
+
+    # Return the best features
+    return best_features
+
+
+# FINAL TRAINING
+# ----------------------------------------------------------------------------------------------------------------------
+def final_training(model_name, aquifers_list, test_len, horizon_max, target_feature, aquifer_by_stations, best_features, best_params):
+    # Initialize model
+    if model_name == 'random_forest':
+        model = RandomForestRegressor(n_estimators= best_params['n_estimators'],
+                                 max_depth= best_params['max_depth'],
+                                 max_features= best_params['max_features'],
+                                 n_jobs=-1,
+                                 random_state=42)
+    elif model_name == 'gradient_boosting':
+        '''model = GradientBoostingRegressor(n_estimators= best_params['n_estimators'],
+                                 max_depth= best_params['max_depth'],
+                                 max_features= best_params['max_features'],
+                                 random_state=42)'''
+        model = HistGradientBoostingRegressor(max_iter= best_params['max_iter'],
+                                              max_depth= best_params['max_depth'],
+                                              max_features= best_params['max_features'],
+                                              learning_rate= best_params['learning_rate'],
+                                              random_state=42)
+    elif model_name == 'linear_regression':
+        model = LinearRegression(n_jobs=-1)
+    else:
+        raise ValueError(f"Model {model_name} not supported for final training")
+
+
+    # List for r2 results for different prediction horizons
+    r2_scores = [[] for _ in range(horizon_max)]
+    
+    # List for storing the predictions (useful for visualization)
+    predictions = []
+    
+    for aquifer in aquifers_list:
+        predictions = [] # make sure that the list is empty for every aquifer
+    
+        for horizon in range (1, horizon_max+1, 1):
+            # Define the train and test set
+            X_train = aquifer_by_stations[aquifer][best_features[f'horizon_{horizon}']][:-(test_len + horizon)]
+            y_train = aquifer_by_stations[aquifer][target_feature][horizon:-test_len]
+    
+            X_test = aquifer_by_stations[aquifer][best_features[f'horizon_{horizon}']][-(test_len + horizon):-horizon]
+            y_test = aquifer_by_stations[aquifer][target_feature][-test_len:]
+    
+            # Train the model
+            model.fit(X_train, y_train)
+    
+            # Make predictions
+            forecast = model.predict(X_test).tolist()
+    
+            # Store to the predictions
+            predictions.append(forecast)
+            
+            # Calculate and save the r2 score
+            r2_scores[horizon-1].append(r2_score(y_test, forecast))
+
+    # Return the average r2 scores
+    r2_average =  []    
+    for i in range(horizon_max):
+        r2_average.append(np.mean(r2_scores[i]))
+
+    return r2_average, r2_scores, predictions
+
+
+# SAVING THE RESULTS
+# ----------------------------------------------------------------------------------------------------------------------
+def save_results(model_name, multivariate, r2_scores, predictions, best_features, best_params, file_path):
+    # Create a dictionary to store the results
+    results = {
+        'model_name': model_name,
+        'multivariate': multivariate,
+        'r2_scores': r2_scores,
+        'predictions': predictions,
+        'best_features': best_features,
+        'best_params': best_params
+    }
+
+    with open(file_path, 'w') as file:
+        json.dump(results, file, indent=4)
+
+
+# EXPERIMENT SETTINGS
+# ----------------------------------------------------------------------------------------------------------------------
+# Load the experiment settings
+with open('statistical_models_experiment_settings.json', 'r') as file:
+    experiment_settings = json.load(file)
+
+# Load the data
+aquifer_by_stations = joblib.load('../../data/interim/ground-water-and-weather-with-forecasts-and-additional-features.joblib')
+
+# Transform date column to year, month and day columns
+for key in aquifer_by_stations.keys():
+    aquifer_by_stations[key]['year'] = aquifer_by_stations[key]['date'].dt.year
+    aquifer_by_stations[key]['month'] = aquifer_by_stations[key]['date'].dt.month
+    aquifer_by_stations[key]['day'] = aquifer_by_stations[key]['date'].dt.day
+
+
+# TESTING THE MODELS
+# ----------------------------------------------------------------------------------------------------------------------
+for name, settings in experiment_settings.items():
+    # Get the model name
+    model_name = experiment_settings[name]['model_name']
+
+    # Variable that tells us if the model is multivariate
+    multivariate = False
+
+    # Check if we need additional features
+    if settings['additional_features']:
+        # Set the multivariate variable to True
+        multivariate = True
+
+        # Feature selection
+        best_features = feature_selection(model_name, settings['feature_selection_aquifer'], 
+                                          settings['test_len'], settings['val_len'], 
+                                          settings['horizon_max'], settings['target_feature'], 
+                                          aquifer_by_stations)
+    else:
+        best_features = {}
+        for horizon in range(1, settings['horizon_max'] + 1):
+            best_features[f'horizon_{horizon}'] = ['altitude_diff']
+
+    # Hyperparameter tuning
+    if settings['hyperparameter_tuning']:
+        best_params = hyperparameter_tuning(model_name, settings['horizon_max'], 
+                                        settings['aquifers_list'], best_features, 
+                                        settings['target_feature'], settings['test_len'], 
+                                        settings['val_len'], aquifer_by_stations)
+    else:
+        best_params = {}
+        
+    # Final training
+    r2_average, r2_scores, predictions = final_training(model_name, settings['aquifers_list'], 
+                                settings['test_len'], settings['horizon_max'], 
+                                settings['target_feature'], aquifer_by_stations,
+                                best_features, best_params)
+    
+    # Save the results
+    file_path = f'../results/{name}.json'
+    save_results(model_name, multivariate, r2_scores, predictions, best_features, best_params, file_path)
+
+    # Print the results
+    print("--------------------------------------------------------------------------------------------------")
+    print(f"Model: {name}")
+    print(f"R2 average: {r2_average}")
+    print("--------------------------------------------------------------------------------------------------\n\n")

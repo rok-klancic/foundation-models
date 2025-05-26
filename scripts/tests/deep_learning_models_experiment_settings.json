@@ -1,0 +1,12 @@
+{
+    "deepar": {
+        "model_name": "deepar",
+        "additional_features": false,
+        "test_len": 365,
+        "val_len": 365,
+        "validation_size": 60,
+        "horizon_max": 5,
+        "target_feature": "altitude_diff",
+        "aquifers_list": [85065, 85064]
+    }
+}

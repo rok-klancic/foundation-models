@@ -197,3 +197,7 @@ reports/randomforest
 foundation_models/
 times_venv/
 data/external/
+time_moe_venv/
+notebooks/aquifer_with_time_moe_forecasts.joblib
+deep_learning_venv/
+scripts/tests/checkpoints/
