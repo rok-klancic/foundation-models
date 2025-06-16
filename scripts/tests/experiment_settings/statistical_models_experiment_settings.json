@@ -1,9 +1,10 @@
 {
-    "gradient_boosting_multivariate": {
-        "model_name": "gradient_boosting",
+    "linear_regression_multivariate": {
+        "model_name": "linear_regression",
         "additional_features": true,
-        "hyperparameter_tuning": true,
-        "feature_selection_aquifer": 85065,
+        "hyperparameter_tuning": false,
+        "feature_selection": "k_best",
+        "k": 80,
         "test_len": 365,
         "val_len": 365,
         "horizon_max": 5,

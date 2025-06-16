@@ -24,6 +24,9 @@ from sklearn_genetic.plots import plot_fitness_evolution
 from sklearn.tree import DecisionTreeRegressor
 # Linear Regression
 from sklearn.linear_model import LinearRegression
+import os
+#SelectKBest
+from sklearn.feature_selection import SelectKBest, f_regression
 
 
 # HYPERPARAMETER TUNING
@@ -124,7 +127,7 @@ class Last365TimeSeriesSplit(BaseCrossValidator):
         test_indices = indices[test_start:]
         yield train_indices, test_indices
 
-def feature_selection(model_name, aquifer, test_len, val_len, horizon_max, target_feature, aquifer_by_stations):
+def ga_feature_selection(model_name, aquifer, test_len, val_len, horizon_max, target_feature, aquifer_by_stations):
     # Initialize model
     if model_name == 'linear_regression':
         model = LinearRegression(n_jobs=-1)
@@ -168,6 +171,35 @@ def feature_selection(model_name, aquifer, test_len, val_len, horizon_max, targe
     # Return the best features
     return best_features
 
+def k_best_feature_selection(aquifers_list, test_len, horizon_max, target_feature, aquifer_by_stations, k):
+    # Dictionary to store the best features
+    best_features = {}
+    
+    # Select k best features using SelectKBest
+    selector = SelectKBest(score_func=f_regression, k=k)
+    
+    for aquifer in aquifers_list:
+        # Get all features
+        features = aquifer_by_stations[aquifer].drop(columns=['date', 'station_id', 'id', 'location_id']).columns
+
+        best_features[aquifer] = {}
+        # For each prediction horizon
+        for horizon in range(1, horizon_max + 1):
+            # Prepare data
+            X = aquifer_by_stations[aquifer][features][:-(test_len + horizon)]
+            y = aquifer_by_stations[aquifer][target_feature][horizon:-test_len]
+            
+            # Fit selector
+            selector.fit(X, y)
+            
+            # Get selected feature names
+            selected_features = features[selector.get_support()].tolist()
+            
+            # Store selected features for this horizon
+            best_features[aquifer][f'horizon_{horizon}'] = selected_features
+    
+    # Return the best features
+    return best_features
 
 # FINAL TRAINING
 # ----------------------------------------------------------------------------------------------------------------------
@@ -205,11 +237,18 @@ def final_training(model_name, aquifers_list, test_len, horizon_max, target_feat
         predictions = [] # make sure that the list is empty for every aquifer
     
         for horizon in range (1, horizon_max+1, 1):
+            # Get the best features
+            # Check if the best features are aquifer specific or not
+            if aquifer in best_features.keys():
+                chosen_features = best_features[aquifer][f'horizon_{horizon}']
+            else:
+                chosen_features = best_features[f'horizon_{horizon}']
+
             # Define the train and test set
-            X_train = aquifer_by_stations[aquifer][best_features[f'horizon_{horizon}']][:-(test_len + horizon)]
+            X_train = aquifer_by_stations[aquifer][chosen_features][:-(test_len + horizon)]
             y_train = aquifer_by_stations[aquifer][target_feature][horizon:-test_len]
     
-            X_test = aquifer_by_stations[aquifer][best_features[f'horizon_{horizon}']][-(test_len + horizon):-horizon]
+            X_test = aquifer_by_stations[aquifer][chosen_features][-(test_len + horizon):-horizon]
             y_test = aquifer_by_stations[aquifer][target_feature][-test_len:]
     
             # Train the model
@@ -234,13 +273,30 @@ def final_training(model_name, aquifers_list, test_len, horizon_max, target_feat
 
 # SAVING THE RESULTS
 # ----------------------------------------------------------------------------------------------------------------------
-def save_results(model_name, multivariate, r2_scores, predictions, best_features, best_params, file_path):
+def get_index(folder_path, file_name):
+    top_index = 0
+    for file in os.listdir(folder_path):
+        if file.endswith('.json') and file.startswith(file_name):
+            whole_name = file.split('.')[0]
+            if '_' not in whole_name:
+                continue
+            else:
+                index = whole_name.split('_')[-1]
+                if index.isdigit():
+                    index = int(index)
+                    if index > top_index:
+                        top_index = index
+
+    return top_index+1
+
+def save_results(model_name, multivariate, r2_scores, predictions, feature_selection, best_features, best_params, file_path):
     # Create a dictionary to store the results
     results = {
         'model_name': model_name,
         'multivariate': multivariate,
         'r2_scores': r2_scores,
         'predictions': predictions,
+        'feature_selection': feature_selection,
         'best_features': best_features,
         'best_params': best_params
     }
@@ -252,7 +308,7 @@ def save_results(model_name, multivariate, r2_scores, predictions, best_features
 # EXPERIMENT SETTINGS
 # ----------------------------------------------------------------------------------------------------------------------
 # Load the experiment settings
-with open('statistical_models_experiment_settings.json', 'r') as file:
+with open('experiment_settings/statistical_models_experiment_settings.json', 'r') as file:
     experiment_settings = json.load(file)
 
 # Load the data
@@ -279,11 +335,20 @@ for name, settings in experiment_settings.items():
         # Set the multivariate variable to True
         multivariate = True
 
-        # Feature selection
-        best_features = feature_selection(model_name, settings['feature_selection_aquifer'], 
-                                          settings['test_len'], settings['val_len'], 
-                                          settings['horizon_max'], settings['target_feature'], 
-                                          aquifer_by_stations)
+        if settings['feature_selection'] == 'ga':
+            # Feature selection
+            best_features = ga_feature_selection(model_name, settings['feature_selection_aquifer'], 
+                                            settings['test_len'], settings['val_len'], 
+                                            settings['horizon_max'], settings['target_feature'], 
+                                            aquifer_by_stations)
+        else:
+            # Feature selection
+            best_features = k_best_feature_selection(aquifers_list=settings['aquifers_list'],
+                                                     test_len=settings['test_len'], 
+                                                     horizon_max=settings['horizon_max'],
+                                                     target_feature=settings['target_feature'], 
+                                                     aquifer_by_stations=aquifer_by_stations,
+                                                     k=settings['k'])
     else:
         best_features = {}
         for horizon in range(1, settings['horizon_max'] + 1):
@@ -304,9 +369,19 @@ for name, settings in experiment_settings.items():
                                 settings['target_feature'], aquifer_by_stations,
                                 best_features, best_params)
     
+    # Obtain the index of the file name (so every experiment has a unique name)
+    index = get_index(folder_path='../results/statistical_models', file_name=name)
+
     # Save the results
-    file_path = f'../results/{name}.json'
-    save_results(model_name, multivariate, r2_scores, predictions, best_features, best_params, file_path)
+    file_path = f'../results/statistical_models/{name}_{index}.json'
+    save_results(model_name=model_name, 
+                 multivariate=multivariate, 
+                 r2_scores=r2_scores, 
+                 predictions=predictions, 
+                 feature_selection=settings['feature_selection'], 
+                 best_features=best_features, 
+                 best_params=best_params, 
+                 file_path=file_path)
 
     # Print the results
     print("--------------------------------------------------------------------------------------------------")

@@ -11,6 +11,7 @@ import torch
 from chronos import ChronosPipeline
 from sklearn.metrics import r2_score
 import optuna
+import os
 
 # HYPERPARAMETER TUNING
 # ----------------------------------------------------------------------------------------------------------------------
@@ -149,6 +150,22 @@ def convert_to_native(obj):
         return [convert_to_native(item) for item in obj]
     return obj
 
+def get_index(folder_path, file_name):
+    top_index = 0
+    for file in os.listdir(folder_path):
+        if file.endswith('.json') and file.startswith(file_name):
+            whole_name = file.split('.')[0]
+            if '_' not in whole_name:
+                continue
+            else:
+                index = whole_name.split('_')[-1]
+                if index.isdigit():
+                    index = int(index)
+                    if index > top_index:
+                        top_index = index
+
+    return top_index+1
+
 def save_results(model_name, multivariate, r2_scores, predictions, best_features, best_params, file_path):
     # Create a dictionary to store the results
     results = {
@@ -167,7 +184,7 @@ def save_results(model_name, multivariate, r2_scores, predictions, best_features
 # EXPERIMENT SETTINGS
 # ----------------------------------------------------------------------------------------------------------------------
 # Load the experiment settings
-with open('chronos_experiment_settings.json', 'r') as file:
+with open('experimet_settings/chronos_experiment_settings.json', 'r') as file:
     experiment_settings = json.load(file)
 
 # Load the data
@@ -197,8 +214,11 @@ for name, settings in experiment_settings.items():
                                                         settings['target_feature'], settings['test_len'], 
                                                         aquifer_by_stations, best_params)
     
+    # Obtain the index of the file name (so every experiment has a unique name)
+    index = get_index(folder_path='../results/foundational_models', file_name=name)
+
     # Save the results
-    file_path = f'../results/{name}.json'
+    file_path = f'../results/foundational_models/{name}_{index}.json'
     save_results(model_name, multivariate, r2_scores, predictions, best_features, best_params, file_path)
 
     # Print the results
