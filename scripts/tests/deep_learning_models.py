@@ -189,6 +189,9 @@ def hyperparameter_tuning(model_name,
                                 optimizer_kwargs={'weight_decay': weight_decay})]
                 model = NeuralForecast(models=models, freq='D')
                 models_list.append(model)
+
+        elif model_name == 'n_hits_multivariate':
+            
             
         else:
             raise ValueError(f"Model {model_name} not supported for hyperparameter tuning")
