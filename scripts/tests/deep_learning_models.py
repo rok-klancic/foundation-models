@@ -1,7 +1,7 @@
 # IMPORT THE NECESSARY LIBRARIES
 # ----------------------------------------------------------------------------------------------------------------------
 # N-BEATS, PatchTST
-from neuralforecast.models import NBEATS, PatchTST
+from neuralforecast.models import NBEATS, PatchTST, NBEATSx
 from neuralforecast.losses.pytorch import HuberLoss
 from neuralforecast.core import NeuralForecast
 import joblib
@@ -23,10 +23,24 @@ from gluonts.dataset.pandas import PandasDataset
 from gluonts.torch.model.deepar import DeepAREstimator
 from lightning.pytorch.callbacks import ModelCheckpoint
 import os
+# Warnings
+import warnings
+warnings.filterwarnings('ignore')
+# Import torch
+import torch
 
 # HYPERPARAMETER TUNING
 # ----------------------------------------------------------------------------------------------------------------------
-def hyperparameter_tuning(model_name, horizon_max, aquifers_list, target_feature, val_len, test_len, validation_size, aquifer_by_stations):
+def hyperparameter_tuning(model_name,
+                          horizon_max,
+                          aquifers_list,
+                          target_feature,
+                          val_len,
+                          test_len,
+                          validation_size,
+                          aquifer_by_stations,
+                          additional_parameters_list,
+                          hist_exog_list):
     def objective(trial):
         if model_name == 'n_beats':
             input_size = trial.suggest_int('input_size', horizon_max*2, 720)
@@ -137,6 +151,45 @@ def hyperparameter_tuning(model_name, horizon_max, aquifers_list, target_feature
                                logger=False)
                          ]
             model = NeuralForecast(models=models, freq='D')
+
+        elif model_name == 'n_beats_x':
+            input_size = trial.suggest_categorical('input_size', [30, 60, 180, 365, 730])
+            n_harmonics = trial.suggest_int('n_harmonics', 1, 5)
+            n_polynomials = trial.suggest_int('n_polynomials', 1, 5)
+            learning_rate = trial.suggest_loguniform('learning_rate', 1e-4, 1e-2)
+            max_steps = trial.suggest_categorical('max_steps', [200, 500, 1000])
+            dropout_prob_theta = trial.suggest_float('dropout_prob_theta', 0.0, 0.3)
+            weight_decay = trial.suggest_loguniform('weight_decay', 1e-6, 1e-2)
+
+            # Initialize the models
+            models_list = []
+            
+            # Fill the models list with the models
+            for i in range(horizon_max):
+                stack_types = ['identity', 'exogenous'] if (i+1) == 1 else ['seasonality', 'trend', 'identity', 'exogenous']
+                n_blocks = [1 for _ in range(len(stack_types))]
+                models = [NBEATSx(h=i+1, 
+                                accelerator='cuda',
+                                input_size=input_size,
+                                stack_types=stack_types,
+                                n_harmonics=n_harmonics,
+                                n_polynomials=n_polynomials,
+                                learning_rate=learning_rate,
+                                max_steps=max_steps,
+                                hist_exog_list=hist_exog_list,
+                                futr_exog_list=additional_parameters_list[i],
+                                devices=[0],
+                                logger=False,
+                                scaler_type='standard',
+                                dropout_prob_theta=dropout_prob_theta,
+                                n_blocks=n_blocks,
+                                #early_stop_patience_steps=30,
+                                #val_check_steps=2,
+                                optimizer=torch.optim.Adam,
+                                optimizer_kwargs={'weight_decay': weight_decay})]
+                model = NeuralForecast(models=models, freq='D')
+                models_list.append(model)
+            
         else:
             raise ValueError(f"Model {model_name} not supported for hyperparameter tuning")
         
@@ -190,6 +243,16 @@ def hyperparameter_tuning(model_name, horizon_max, aquifers_list, target_feature
                 # Fit the model
                 model.fit(y[:-val_len], val_size=validation_size)
 
+            elif model_name == 'n_beats_x':
+                # Rename the columns (library wants to have specific names)
+                y = y.rename(columns={'date':'ds', 'altitude_diff':'y', 'station_id':'unique_id'})
+
+                # Fit the models
+                for i in range(horizon_max):
+                    # Only keep the relevant columns
+                    y_fit = y[['ds', 'y', 'unique_id']+additional_parameters_list[i]+hist_exog_list]
+                    models_list[i].fit(y_fit[:-val_len], val_size=0)
+
             else:
                 raise ValueError(f"Model {model_name} not supported for hyperparameter tuning")
             
@@ -215,6 +278,16 @@ def hyperparameter_tuning(model_name, horizon_max, aquifers_list, target_feature
                 
                 elif model_name == 'patchtst':
                     forecast = model.predict(df=y[:-i])
+
+                elif model_name == 'n_beats_x':
+                    for j in range(horizon_max):
+                        y_fit = y[['ds', 'y', 'unique_id']+additional_parameters_list[j]+hist_exog_list]
+                        if (i-(j+1)) >= 0 and (i-(j+1)) < val_len:
+                            futr_df_index = -(i-(j+1)) if i-(j+1) > 0 else None
+                            # Predict
+                            forecast = models_list[j].predict(df=y_fit[:-i], futr_df=y[additional_parameters_list[j] + ['ds', 'unique_id']][-i:futr_df_index], verbose=0)
+                            # Store the results for every prediction horizon separately
+                            predictions[j].append(forecast['NBEATSx'].values[j])
                
                 else:
                     raise ValueError(f"Model {model_name} not supported for hyperparameter tuning")
@@ -236,20 +309,22 @@ def hyperparameter_tuning(model_name, horizon_max, aquifers_list, target_feature
                 elif model_name == 'patchtst':
                     for i in range(horizon_max):
                         predictions[i].append(forecast['PatchTST'].values[i])
-                
+
+                elif model_name == 'n_beats_x':
+                    pass
                 else:
                     raise ValueError(f"Model {model_name} not supported for hyperparameter tuning")
-            
-            # Clean up the results
-            for i in range(horizon_max):
-                if i == 0:
-                    predictions[i] = predictions[i][-val_len:]
-                else:
-                    predictions[i] = predictions[i][(horizon_max-i-1):-i]            
+            if model_name != 'n_beats_x':
+                # Clean up the results
+                for i in range(horizon_max):
+                    if i == 0:
+                        predictions[i] = predictions[i][-val_len:]
+                    else:
+                        predictions[i] = predictions[i][(horizon_max-i-1):-i]            
     
             # Calculate the r2 scores and store them in a list
             for i in range(horizon_max):
-                if model_name == 'n_beats' or model_name == 'patchtst':
+                if model_name == 'n_beats' or model_name == 'patchtst' or model_name == 'n_beats_x':
                     r2_scores[i].append(r2_score(y['y'][-val_len:], predictions[i]))
                 else:
                     r2_scores[i].append(r2_score(y[target_feature][-val_len:], predictions[i]))
@@ -267,7 +342,7 @@ def hyperparameter_tuning(model_name, horizon_max, aquifers_list, target_feature
     
     # Run the optuna
     study = optuna.create_study(direction='maximize')
-    study.optimize(objective, n_trials=30)
+    study.optimize(objective, n_trials=1)
 
     # Return the best parameters
     return study.best_params
@@ -275,7 +350,16 @@ def hyperparameter_tuning(model_name, horizon_max, aquifers_list, target_feature
 
 # FINAL TRAINING
 # ----------------------------------------------------------------------------------------------------------------------
-def final_training(model_name, aquifers_list, test_len, validation_size, horizon_max, target_feature, aquifer_by_stations, best_params):
+def final_training(model_name,
+                   aquifers_list,
+                   test_len,
+                   validation_size,
+                   horizon_max, 
+                   target_feature,
+                   aquifer_by_stations,
+                   best_params,
+                   additional_parameters_list,
+                   hist_exog_list):
     if model_name == 'n_beats':
         models = [NBEATS(h=horizon_max, 
                          loss=HuberLoss(),
@@ -341,6 +425,34 @@ def final_training(model_name, aquifers_list, test_len, validation_size, horizon
             freq='D'
         )
     
+    elif model_name == 'n_beats_x':
+        # Initialize the models
+        models_list = []
+        
+        # Fill the models list with the models
+        for i in range(horizon_max):
+            stack_types = ['identity', 'exogenous'] if (i+1) == 1 else ['seasonality', 'trend', 'identity', 'exogenous']
+            n_blocks = [1 for _ in range(len(stack_types))]
+            models = [NBEATSx(h=i+1, 
+                            accelerator='cuda',
+                            input_size=best_params['input_size'],
+                            stack_types=stack_types,
+                            n_harmonics=best_params['n_harmonics'],
+                            n_polynomials=best_params['n_polynomials'],
+                            learning_rate=best_params['learning_rate'],
+                            max_steps=best_params['max_steps'],
+                            hist_exog_list=hist_exog_list,
+                            futr_exog_list=additional_parameters_list[i],
+                            devices=[0],
+                            logger=False,
+                            scaler_type='standard',
+                            dropout_prob_theta=best_params['dropout_prob_theta'],
+                            n_blocks=n_blocks,
+                            optimizer=torch.optim.Adam,
+                            optimizer_kwargs={'weight_decay': best_params['weight_decay']})]
+            model = NeuralForecast(models=models, freq='D')
+            models_list.append(model)
+    
     else:
         raise ValueError(f"Model {model_name} not supported for final training")
     
@@ -392,6 +504,16 @@ def final_training(model_name, aquifers_list, test_len, validation_size, horizon
             y_train = y[:-test_len]
             nf.fit(y_train, val_size=validation_size)
 
+        elif model_name == 'n_beats_x':
+            # Rename the columns (library wants to have specific names)
+            y = y.rename(columns={'date':'ds', 'altitude_diff':'y', 'station_id':'unique_id'})
+            
+            # Fit the models
+            for i in range(horizon_max):
+                # Only keep the relevant columns
+                y_fit = y[['ds', 'y', 'unique_id']+additional_parameters_list[i]+hist_exog_list]
+                models_list[i].fit(y_fit[:-test_len], val_size=0)
+
         else:
             raise ValueError(f"Model {model_name} not supported for final training")
         
@@ -415,7 +537,16 @@ def final_training(model_name, aquifers_list, test_len, validation_size, horizon
             
             elif model_name == 'patchtst':
                 forecast = nf.predict(df=y[:-i])
-            
+
+            elif model_name == 'n_beats_x':
+                for j in range(horizon_max):
+                    y_fit = y[['ds', 'y', 'unique_id']+additional_parameters_list[j]+hist_exog_list]
+                    if (i-(j+1)) >= 0 and (i-(j+1)) < test_len:
+                        futr_df_index = -(i-(j+1)) if i-(j+1) > 0 else None
+                        # Predict
+                        forecast = models_list[j].predict(df=y_fit[:-i], futr_df=y[additional_parameters_list[j] + ['ds', 'unique_id']][-i:futr_df_index], verbose=0)
+                        # Store the results for every prediction horizon separately
+                        predictions[j].append(forecast['NBEATSx'].values[j])
             else:
                 raise ValueError(f"Model {model_name} not supported for final training")
     
@@ -429,15 +560,18 @@ def final_training(model_name, aquifers_list, test_len, validation_size, horizon
                     predictions[i].append(forecast[i])
                 elif model_name == 'patchtst':
                     predictions[i].append(forecast['PatchTST'].values[i])
+                elif model_name == 'n_beats_x':
+                    pass
                 else:
                     raise ValueError(f"Model {model_name} not supported for final training")
         
         # Clean up the results
-        for i in range(horizon_max):
-            if i == 0:
-                predictions[i] = predictions[i][-test_len:]
-            else:
-                predictions[i] = predictions[i][(horizon_max-i-1):-i]
+        if model_name != 'n_beats_x':
+            for i in range(horizon_max):
+                if i == 0:
+                    predictions[i] = predictions[i][-test_len:]
+                else:
+                    predictions[i] = predictions[i][(horizon_max-i-1):-i]
     
         # Store the predictions to the dictionary
         predictions_by_stations[aquifer] = predictions
@@ -453,6 +587,19 @@ def final_training(model_name, aquifers_list, test_len, validation_size, horizon
 
     # Return the predictions and the r2 scores
     return r2_average, r2_scores, predictions_by_stations
+
+
+# SHIFTING THE DATA
+# ----------------------------------------------------------------------------------------------------------------------
+def shift_data(aquifers_list, aquifer_by_stations, horizon_max, additional_parameters_list):
+    for i in range(horizon_max):
+        for aquifer in aquifers_list:
+            aquifer_by_stations[aquifer][additional_parameters_list[i]] = aquifer_by_stations[aquifer][additional_parameters_list[i]].shift(i+1)
+    
+    for aquifer in aquifers_list:
+        aquifer_by_stations[aquifer] = aquifer_by_stations[aquifer].iloc[horizon_max:]
+
+    return aquifer_by_stations
 
 
 # SAVING THE RESULTS
@@ -484,7 +631,15 @@ def get_index(folder_path, file_name):
 
     return top_index+1
 
-def save_results(model_name, multivariate, r2_scores, predictions, best_features, best_params, file_path):
+def save_results(model_name,
+                 multivariate,
+                 r2_scores,
+                 predictions,
+                 best_features,
+                 best_params,
+                 file_path,
+                 additional_parameters_list,
+                 hist_exog_list):
     # Create a dictionary to store the results
     results = {
         'model_name': model_name,
@@ -492,7 +647,9 @@ def save_results(model_name, multivariate, r2_scores, predictions, best_features
         'r2_scores': convert_to_native(r2_scores),
         'predictions': convert_to_native(predictions),
         'best_features': best_features,
-        'best_params': best_params
+        'best_params': best_params,
+        'additional_parameters_list': additional_parameters_list,
+        'hist_exog_list': hist_exog_list
     }
 
     with open(file_path, 'w') as file:
@@ -508,37 +665,78 @@ with open('experiment_settings/deep_learning_models_experiment_settings.json', '
 # Load the data
 aquifer_by_stations = joblib.load('../../data/interim/ground-water-and-weather-with-forecasts-and-additional-features.joblib')
 
-for aquifer in aquifer_by_stations.keys():
-    aquifer_by_stations[aquifer] = aquifer_by_stations[aquifer][['altitude_diff', 'date', 'station_id']]
-
-
 # TESTING THE MODELS
 # ----------------------------------------------------------------------------------------------------------------------
 for name, settings in experiment_settings.items():
     # Get the model name
     model_name = experiment_settings[name]['model_name']
 
+
     # Variable that tells us if the model is multivariate
-    multivariate = False
+    multivariate = experiment_settings[name]['additional_features']
+
+    # If the model is univariate, remove additional features
+    if not multivariate:
+        for aquifer in aquifer_by_stations.keys():
+            aquifer_by_stations[aquifer] = aquifer_by_stations[aquifer][['altitude_diff', 'date', 'station_id']]
+
+    # List of additional parameters
+    if multivariate:
+        additional_parameters_list = settings['additional_parameters_list']
+        hist_exog_list = settings['hist_exog_list']
+    else:
+        if model_name == 'n_beats_x':
+            raise ValueError(f"Model {model_name} is not supported for univariate data")
+        additional_parameters_list = []
+        hist_exog_list = []
+
+    # Shift the data if needed
+    if multivariate:
+        aquifer_by_stations = shift_data(aquifers_list=settings['aquifers_list'],
+                                         aquifer_by_stations=aquifer_by_stations,
+                                         horizon_max=settings['horizon_max'],
+                                         additional_parameters_list=settings['additional_parameters_list'])
+
     best_features = {}
 
     # Hyperparameter tuning
-    best_params = hyperparameter_tuning(model_name, settings['horizon_max'], settings['aquifers_list'], 
-                                        settings['target_feature'], settings['val_len'], settings['test_len'], 
-                                        settings['validation_size'], aquifer_by_stations)
+    best_params = hyperparameter_tuning(model_name=model_name,
+                                        horizon_max=settings['horizon_max'],
+                                        aquifers_list=settings['aquifers_list'], 
+                                        target_feature=settings['target_feature'],
+                                        val_len=settings['val_len'],
+                                        test_len=settings['test_len'], 
+                                        validation_size=settings['validation_size'],
+                                        aquifer_by_stations=aquifer_by_stations,
+                                        additional_parameters_list=additional_parameters_list,
+                                        hist_exog_list=hist_exog_list)
         
     # Final training
-    r2_average, r2_scores, predictions = final_training(model_name, settings['aquifers_list'], 
-                                                        settings['test_len'], settings['validation_size'], 
-                                                        settings['horizon_max'], settings['target_feature'], 
-                                                        aquifer_by_stations, best_params)
+    r2_average, r2_scores, predictions = final_training(model_name=model_name,
+                                                        aquifers_list=settings['aquifers_list'], 
+                                                        test_len=settings['test_len'],
+                                                        validation_size=settings['validation_size'], 
+                                                        horizon_max=settings['horizon_max'],
+                                                        target_feature=settings['target_feature'],
+                                                        aquifer_by_stations=aquifer_by_stations,
+                                                        best_params=best_params,
+                                                        additional_parameters_list=additional_parameters_list,
+                                                        hist_exog_list=hist_exog_list)
     
     # Obtain the index of the file name (so every experiment has a unique name)
     index = get_index(folder_path='../results/deep_learning_models', file_name=name)
 
     # Save the results
     file_path = f'../results/deep_learning_models/{name}_{index}.json'
-    save_results(model_name, multivariate, r2_scores, predictions, best_features, best_params, file_path)
+    save_results(model_name=model_name,
+                 multivariate=multivariate,
+                 r2_scores=r2_scores,
+                 predictions=predictions,
+                 best_features=best_features,
+                 best_params=best_params,
+                 file_path=file_path,
+                 additional_parameters_list=additional_parameters_list,
+                 hist_exog_list=hist_exog_list)
 
     # Print the results
     print("--------------------------------------------------------------------------------------------------")

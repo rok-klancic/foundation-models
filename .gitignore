@@ -202,3 +202,4 @@ deep_learning_venv/
 scripts/tests/checkpoints/
 time_moe_venv/
 /neural_networks_py3.10_venv/
+/.python-version
