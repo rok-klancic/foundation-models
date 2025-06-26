@@ -12,7 +12,6 @@ import joblib
 from sklearn.metrics import r2_score
 
 # Linear regression for the multivariate model
-
 from sklearn.linear_model import LinearRegression
 from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import Ridge
@@ -27,6 +26,9 @@ warnings.filterwarnings('ignore')
 
 # json
 import json
+
+# Import functions for time_moe + statistical
+from time_moe_covariates_scripts.time_moe__linear_regression import *
 
 
 

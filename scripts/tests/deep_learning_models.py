@@ -1,7 +1,7 @@
 # IMPORT THE NECESSARY LIBRARIES
 # ----------------------------------------------------------------------------------------------------------------------
 # N-BEATS, PatchTST
-from neuralforecast.models import NBEATS, PatchTST, NBEATSx
+from neuralforecast.models import NBEATS, PatchTST, NBEATSx, NHITS
 from neuralforecast.losses.pytorch import HuberLoss
 from neuralforecast.core import NeuralForecast
 import joblib
@@ -189,6 +189,85 @@ def hyperparameter_tuning(model_name,
                                 optimizer_kwargs={'weight_decay': weight_decay})]
                 model = NeuralForecast(models=models, freq='D')
                 models_list.append(model)
+
+        elif model_name == 'n_hits_multivariate':
+            input_size = trial.suggest_categorical('input_size', [30, 60, 180, 365, 730])
+            stack_types = trial.suggest_categorical('stack_types', [['identity', 'identity'],
+                                                                    ['identity', 'identity', 'identity'], 
+                                                                    ['identity', 'identity', 'identity', 'identity']])
+            
+            # n_blocks
+            if len(stack_types) == 2:
+                n_blocks = trial.suggest_categorical('n_blocks', [[1, 1], [2, 2]])
+            elif len(stack_types) == 3:
+                n_blocks = trial.suggest_categorical('n_blocks', [[1, 1, 1], [2, 2, 2]])
+            elif len(stack_types) == 4:
+                n_blocks = trial.suggest_categorical('n_blocks', [[1, 1, 1, 1], [2, 2, 2, 2]])
+            else:
+                raise ValueError(f"Stack types {stack_types} not supported")
+            
+            # n_freq_downsample
+            if len(stack_types) == 2:
+                n_freq_downsample = trial.suggest_categorical('n_freq_downsample', [[2, 1], [3, 1], [4, 1]])
+            elif len(stack_types) == 3:
+                n_freq_downsample = trial.suggest_categorical('n_freq_downsample', [[4, 2, 1], [3, 2, 1], [2, 1, 1]])
+            elif len(stack_types) == 4:
+                n_freq_downsample = trial.suggest_categorical('n_freq_downsample', [[4, 3, 2, 1], [3, 2, 1, 1], [2, 1, 1, 1]])
+            else:
+                raise ValueError(f"Stack types {stack_types} not supported")
+
+            # mlp_units
+            if len(stack_types) == 2:
+                mlp_units = trial.suggest_categorical('mlp_units', [[[256, 256], [256, 256]], [[128, 128], [128, 128]], [[512, 512], [512, 512]], [[1024, 1024], [1024, 1024]]])
+            elif len(stack_types) == 3:
+                mlp_units = trial.suggest_categorical('mlp_units', [[[256, 256], [256, 256], [256, 256]], [[128, 128], [128, 128], [128, 128]], [[512, 512], [512, 512], [512, 512]], [[1024, 1024], [1024, 1024], [1024, 1024]]])
+            elif len(stack_types) == 4:
+                mlp_units = trial.suggest_categorical('mlp_units', [[[256, 256], [256, 256], [256, 256], [256, 256]], [[128, 128], [128, 128], [128, 128], [128, 128]], [[512, 512], [512, 512], [512, 512], [512, 512]], [[1024, 1024], [1024, 1024], [1024, 1024], [1024, 1024]]])
+            else:
+                raise ValueError(f"Stack types {stack_types} not supported")
+
+            # n_pool_kernel_size
+            if len(stack_types) == 2:
+                n_pool_kernel_size = trial.suggest_categorical('n_pool_kernel_size', [[2, 1], [3, 1], [4, 1]])
+            elif len(stack_types) == 3:
+                n_pool_kernel_size = trial.suggest_categorical('n_pool_kernel_size', [[4, 2, 1], [3, 2, 1], [2, 1, 1]])
+            elif len(stack_types) == 4:
+                n_pool_kernel_size = trial.suggest_categorical('n_pool_kernel_size', [[4, 3, 2, 1], [3, 2, 1, 1], [2, 1, 1, 1]])
+            else:
+                raise ValueError(f"Stack types {stack_types} not supported")
+            
+            dropout_prob_theta = trial.suggest_float('dropout_prob_theta', 0.0, 0.3)
+            learning_rate = trial.suggest_loguniform('learning_rate', 1e-4, 1e-2)
+            max_steps = trial.suggest_categorical('max_steps', [100, 200, 500, 1000])
+            dropout_prob_theta = trial.suggest_float('dropout_prob_theta', 0.0, 0.3)
+            weight_decay = trial.suggest_loguniform('weight_decay', 0.0, 1e-2)
+            activation = trial.suggest_categorical('activation', ['ReLU', 'Softplus', 'Tanh', 'SELU', 'LeakyReLU', 'PReLU', 'Sigmoid'])
+            
+            # Initialize the models
+            models_list = []
+            # Fill the models list with the models
+            for i in range(horizon_max):
+                models = [NHITS(h=i+1, 
+                                accelerator='cuda',
+                                input_size=input_size,
+                                max_steps=max_steps,
+                                learning_rate=learning_rate,
+                                hist_exog_list=hist_exog_list,
+                                futr_exog_list=additional_parameters_list[i],
+                                devices=[0],
+                                logger=False,
+                                scaler_type='standard',
+                                dropout_prob_theta=dropout_prob_theta,
+                                stack_types=stack_types,
+                                n_freq_downsample=n_freq_downsample,
+                                mlp_units=mlp_units,
+                                n_pool_kernel_size=n_pool_kernel_size,
+                                n_blocks=n_blocks,
+                                optimizer=torch.optim.Adam,
+                                optimizer_kwargs={'weight_decay': weight_decay},
+                                activation=activation)]
+                model = NeuralForecast(models=models, freq='D')
+                models_list.append(model)
             
         else:
             raise ValueError(f"Model {model_name} not supported for hyperparameter tuning")
@@ -243,7 +322,7 @@ def hyperparameter_tuning(model_name,
                 # Fit the model
                 model.fit(y[:-val_len], val_size=validation_size)
 
-            elif model_name == 'n_beats_x':
+            elif model_name in ['n_beats_x', 'n_hits_multivariate']:
                 # Rename the columns (library wants to have specific names)
                 y = y.rename(columns={'date':'ds', 'altitude_diff':'y', 'station_id':'unique_id'})
 
@@ -288,6 +367,16 @@ def hyperparameter_tuning(model_name,
                             forecast = models_list[j].predict(df=y_fit[:-i], futr_df=y[additional_parameters_list[j] + ['ds', 'unique_id']][-i:futr_df_index], verbose=0)
                             # Store the results for every prediction horizon separately
                             predictions[j].append(forecast['NBEATSx'].values[j])
+
+                elif model_name == 'n_hits_multivariate':
+                    for j in range(horizon_max):
+                        y_fit = y[['ds', 'y', 'unique_id']+additional_parameters_list[j]+hist_exog_list]
+                        if (i-(j+1)) >= 0 and (i-(j+1)) < val_len:
+                            futr_df_index = -(i-(j+1)) if i-(j+1) > 0 else None
+                            # Predict
+                            forecast = models_list[j].predict(df=y_fit[:-i], futr_df=y[additional_parameters_list[j] + ['ds', 'unique_id']][-i:futr_df_index], verbose=0)
+                            # Store the results for every prediction horizon separately
+                            predictions[j].append(forecast['NHITS'].values[j])
                
                 else:
                     raise ValueError(f"Model {model_name} not supported for hyperparameter tuning")
@@ -310,11 +399,11 @@ def hyperparameter_tuning(model_name,
                     for i in range(horizon_max):
                         predictions[i].append(forecast['PatchTST'].values[i])
 
-                elif model_name == 'n_beats_x':
+                elif model_name in ['n_beats_x', 'n_hits_multivariate']:
                     pass
                 else:
                     raise ValueError(f"Model {model_name} not supported for hyperparameter tuning")
-            if model_name != 'n_beats_x':
+            if model_name not in ['n_hits_multivariate', 'n_beats_x']:
                 # Clean up the results
                 for i in range(horizon_max):
                     if i == 0:
@@ -324,7 +413,7 @@ def hyperparameter_tuning(model_name,
     
             # Calculate the r2 scores and store them in a list
             for i in range(horizon_max):
-                if model_name == 'n_beats' or model_name == 'patchtst' or model_name == 'n_beats_x':
+                if model_name in ['n_beats', 'patchtst', 'n_beats_x', 'n_hits_multivariate']:
                     r2_scores[i].append(r2_score(y['y'][-val_len:], predictions[i]))
                 else:
                     r2_scores[i].append(r2_score(y[target_feature][-val_len:], predictions[i]))
@@ -453,6 +542,34 @@ def final_training(model_name,
             model = NeuralForecast(models=models, freq='D')
             models_list.append(model)
     
+    elif model_name == 'n_hits_multivariate':        
+        # Initialize the models
+        models_list = []
+
+        # Fill the models list with the models
+        for i in range(horizon_max):
+            models = [NHITS(h=i+1, 
+                            accelerator='cuda',
+                            input_size=best_params['input_size'],
+                            max_steps=best_params['max_steps'],
+                            learning_rate=best_params['learning_rate'],
+                            hist_exog_list=hist_exog_list,
+                            futr_exog_list=additional_parameters_list[i],
+                            devices=[0],
+                            logger=False,
+                            scaler_type='standard',
+                            dropout_prob_theta=best_params['dropout_prob_theta'],
+                            stack_types=best_params['stack_types'],
+                            n_freq_downsample=best_params['n_freq_downsample'],
+                            mlp_units=best_params['mlp_units'],
+                            n_pool_kernel_size=best_params['n_pool_kernel_size'],
+                            n_blocks=best_params['n_blocks'],
+                            optimizer=torch.optim.Adam,
+                            optimizer_kwargs={'weight_decay': best_params['weight_decay']},
+                            activation=best_params['activation'])]
+            model = NeuralForecast(models=models, freq='D')
+            models_list.append(model)
+
     else:
         raise ValueError(f"Model {model_name} not supported for final training")
     
@@ -504,7 +621,7 @@ def final_training(model_name,
             y_train = y[:-test_len]
             nf.fit(y_train, val_size=validation_size)
 
-        elif model_name == 'n_beats_x':
+        elif model_name in ['n_beats_x', 'n_hits_multivariate']:
             # Rename the columns (library wants to have specific names)
             y = y.rename(columns={'date':'ds', 'altitude_diff':'y', 'station_id':'unique_id'})
             
@@ -547,6 +664,17 @@ def final_training(model_name,
                         forecast = models_list[j].predict(df=y_fit[:-i], futr_df=y[additional_parameters_list[j] + ['ds', 'unique_id']][-i:futr_df_index], verbose=0)
                         # Store the results for every prediction horizon separately
                         predictions[j].append(forecast['NBEATSx'].values[j])
+
+            elif model_name == 'n_hits_multivariate':
+                for j in range(horizon_max):
+                    y_fit = y[['ds', 'y', 'unique_id']+additional_parameters_list[j]+hist_exog_list]
+                    if (i-(j+1)) >= 0 and (i-(j+1)) < test_len:
+                        futr_df_index = -(i-(j+1)) if i-(j+1) > 0 else None
+                        # Predict
+                        forecast = models_list[j].predict(df=y_fit[:-i], futr_df=y[additional_parameters_list[j] + ['ds', 'unique_id']][-i:futr_df_index], verbose=0)
+                        # Store the results for every prediction horizon separately
+                        predictions[j].append(forecast['NHITS'].values[j])
+            
             else:
                 raise ValueError(f"Model {model_name} not supported for final training")
     
@@ -560,13 +688,13 @@ def final_training(model_name,
                     predictions[i].append(forecast[i])
                 elif model_name == 'patchtst':
                     predictions[i].append(forecast['PatchTST'].values[i])
-                elif model_name == 'n_beats_x':
+                elif model_name in ['n_beats_x', 'n_hits_multivariate']:
                     pass
                 else:
                     raise ValueError(f"Model {model_name} not supported for final training")
         
         # Clean up the results
-        if model_name != 'n_beats_x':
+        if model_name not in ['n_hits_multivariate', 'n_beats_x']:
             for i in range(horizon_max):
                 if i == 0:
                     predictions[i] = predictions[i][-test_len:]
@@ -685,7 +813,7 @@ for name, settings in experiment_settings.items():
         additional_parameters_list = settings['additional_parameters_list']
         hist_exog_list = settings['hist_exog_list']
     else:
-        if model_name == 'n_beats_x':
+        if model_name in ['n_beats_x', 'n_hits_multivariate']:
             raise ValueError(f"Model {model_name} is not supported for univariate data")
         additional_parameters_list = []
         hist_exog_list = []
