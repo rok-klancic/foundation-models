@@ -2,12 +2,12 @@
     "n_beats_x": {
         "model_name": "n_beats_x",
         "additional_features": true,
-        "test_len": 20,
-        "val_len": 20,
+        "test_len": 365,
+        "val_len": 365,
         "validation_size": 0,
-        "horizon_max": 1,
+        "horizon_max": 5,
         "target_feature": "altitude_diff",
-        "aquifers_list": [85065],
+        "aquifers_list": [85065, 85064],
         "additional_parameters_list": [
             ["tn_1", "tx_1", "nn_decodeText_1", "rr_decodeText_1", "ff_decodeText_1"],
             ["tn_2", "tx_2", "nn_decodeText_2", "rr_decodeText_2", "ff_decodeText_2"],
