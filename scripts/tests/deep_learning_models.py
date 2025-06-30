@@ -28,6 +28,8 @@ import warnings
 warnings.filterwarnings('ignore')
 # Import torch
 import torch
+# Import time
+import time
 
 # HYPERPARAMETER TUNING
 # ----------------------------------------------------------------------------------------------------------------------
@@ -198,41 +200,41 @@ def hyperparameter_tuning(model_name,
             
             # n_blocks
             if len(stack_types) == 2:
-                n_blocks = trial.suggest_categorical('n_blocks', [[1, 1], [2, 2]])
+                n_blocks = trial.suggest_categorical('n_blocks_2', [[1, 1], [2, 2]])
             elif len(stack_types) == 3:
-                n_blocks = trial.suggest_categorical('n_blocks', [[1, 1, 1], [2, 2, 2]])
+                n_blocks = trial.suggest_categorical('n_blocks_3', [[1, 1, 1], [2, 2, 2]])
             elif len(stack_types) == 4:
-                n_blocks = trial.suggest_categorical('n_blocks', [[1, 1, 1, 1], [2, 2, 2, 2]])
+                n_blocks = trial.suggest_categorical('n_blocks_4', [[1, 1, 1, 1], [2, 2, 2, 2]])
             else:
                 raise ValueError(f"Stack types {stack_types} not supported")
             
             # n_freq_downsample
             if len(stack_types) == 2:
-                n_freq_downsample = trial.suggest_categorical('n_freq_downsample', [[2, 1], [3, 1], [4, 1]])
+                n_freq_downsample = trial.suggest_categorical('n_freq_downsample_2', [[2, 1], [3, 1], [4, 1]])
             elif len(stack_types) == 3:
-                n_freq_downsample = trial.suggest_categorical('n_freq_downsample', [[4, 2, 1], [3, 2, 1], [2, 1, 1]])
+                n_freq_downsample = trial.suggest_categorical('n_freq_downsample_3', [[4, 2, 1], [3, 2, 1], [2, 1, 1]])
             elif len(stack_types) == 4:
-                n_freq_downsample = trial.suggest_categorical('n_freq_downsample', [[4, 3, 2, 1], [3, 2, 1, 1], [2, 1, 1, 1]])
+                n_freq_downsample = trial.suggest_categorical('n_freq_downsample_4', [[4, 3, 2, 1], [3, 2, 1, 1], [2, 1, 1, 1]])
             else:
                 raise ValueError(f"Stack types {stack_types} not supported")
 
             # mlp_units
             if len(stack_types) == 2:
-                mlp_units = trial.suggest_categorical('mlp_units', [[[256, 256], [256, 256]], [[128, 128], [128, 128]], [[512, 512], [512, 512]], [[1024, 1024], [1024, 1024]]])
+                mlp_units = trial.suggest_categorical('mlp_units_2', [[[256, 256], [256, 256]], [[128, 128], [128, 128]], [[512, 512], [512, 512]], [[1024, 1024], [1024, 1024]]])
             elif len(stack_types) == 3:
-                mlp_units = trial.suggest_categorical('mlp_units', [[[256, 256], [256, 256], [256, 256]], [[128, 128], [128, 128], [128, 128]], [[512, 512], [512, 512], [512, 512]], [[1024, 1024], [1024, 1024], [1024, 1024]]])
+                mlp_units = trial.suggest_categorical('mlp_units_3', [[[256, 256], [256, 256], [256, 256]], [[128, 128], [128, 128], [128, 128]], [[512, 512], [512, 512], [512, 512]], [[1024, 1024], [1024, 1024], [1024, 1024]]])
             elif len(stack_types) == 4:
-                mlp_units = trial.suggest_categorical('mlp_units', [[[256, 256], [256, 256], [256, 256], [256, 256]], [[128, 128], [128, 128], [128, 128], [128, 128]], [[512, 512], [512, 512], [512, 512], [512, 512]], [[1024, 1024], [1024, 1024], [1024, 1024], [1024, 1024]]])
+                mlp_units = trial.suggest_categorical('mlp_units_4', [[[256, 256], [256, 256], [256, 256], [256, 256]], [[128, 128], [128, 128], [128, 128], [128, 128]], [[512, 512], [512, 512], [512, 512], [512, 512]], [[1024, 1024], [1024, 1024], [1024, 1024], [1024, 1024]]])
             else:
                 raise ValueError(f"Stack types {stack_types} not supported")
 
             # n_pool_kernel_size
             if len(stack_types) == 2:
-                n_pool_kernel_size = trial.suggest_categorical('n_pool_kernel_size', [[2, 1], [3, 1], [4, 1]])
+                n_pool_kernel_size = trial.suggest_categorical('n_pool_kernel_size_2', [[2, 1], [3, 1], [4, 1]])
             elif len(stack_types) == 3:
-                n_pool_kernel_size = trial.suggest_categorical('n_pool_kernel_size', [[4, 2, 1], [3, 2, 1], [2, 1, 1]])
+                n_pool_kernel_size = trial.suggest_categorical('n_pool_kernel_size_3', [[4, 2, 1], [3, 2, 1], [2, 1, 1]])
             elif len(stack_types) == 4:
-                n_pool_kernel_size = trial.suggest_categorical('n_pool_kernel_size', [[4, 3, 2, 1], [3, 2, 1, 1], [2, 1, 1, 1]])
+                n_pool_kernel_size = trial.suggest_categorical('n_pool_kernel_size_4', [[4, 3, 2, 1], [3, 2, 1, 1], [2, 1, 1, 1]])
             else:
                 raise ValueError(f"Stack types {stack_types} not supported")
             
@@ -240,7 +242,7 @@ def hyperparameter_tuning(model_name,
             learning_rate = trial.suggest_loguniform('learning_rate', 1e-4, 1e-2)
             max_steps = trial.suggest_categorical('max_steps', [100, 200, 500, 1000])
             dropout_prob_theta = trial.suggest_float('dropout_prob_theta', 0.0, 0.3)
-            weight_decay = trial.suggest_loguniform('weight_decay', 0.0, 1e-2)
+            weight_decay = trial.suggest_categorical('weight_decay', [0.0, 1e-5, 1e-4, 1e-3, 1e-2])
             activation = trial.suggest_categorical('activation', ['ReLU', 'Softplus', 'Tanh', 'SELU', 'LeakyReLU', 'PReLU', 'Sigmoid'])
             
             # Initialize the models
@@ -431,10 +433,21 @@ def hyperparameter_tuning(model_name,
     
     # Run the optuna
     study = optuna.create_study(direction='maximize')
-    study.optimize(objective, n_trials=1)
+    study.optimize(objective, n_trials=50)
+
+    # Clean up parameter names by removing trailing numbers
+    cleaned_params = {}
+    for key, value in study.best_params.items():
+        parts = key.split('_')
+        if parts[-1].isdigit():
+            # Remove the number and underscore at the end
+            new_key = '_'.join(parts[:-1])
+            cleaned_params[new_key] = value
+        else:
+            cleaned_params[key] = value
 
     # Return the best parameters
-    return study.best_params
+    return cleaned_params
 
 
 # FINAL TRAINING
@@ -786,6 +799,9 @@ def save_results(model_name,
 
 # EXPERIMENT SETTINGS
 # ----------------------------------------------------------------------------------------------------------------------
+# Time the experiment
+start_time = time.time()
+
 # Load the experiment settings
 with open('experiment_settings/deep_learning_models_experiment_settings.json', 'r') as file:
     experiment_settings = json.load(file)
@@ -851,6 +867,14 @@ for name, settings in experiment_settings.items():
                                                         additional_parameters_list=additional_parameters_list,
                                                         hist_exog_list=hist_exog_list)
     
+    # Time the experiment
+    end_time = time.time()
+    total_time = end_time - start_time
+    # Convert total time to hours, minutes, seconds
+    hours = int(total_time // 3600)
+    minutes = int((total_time % 3600) // 60)
+    seconds = int(total_time % 60)
+
     # Obtain the index of the file name (so every experiment has a unique name)
     index = get_index(folder_path='../results/deep_learning_models', file_name=name)
 
@@ -870,4 +894,5 @@ for name, settings in experiment_settings.items():
     print("--------------------------------------------------------------------------------------------------")
     print(f"Model: {name}")
     print(f"R2 average: {r2_average}")
+    print(f"Total time: {hours}h {minutes}m {seconds}s")
     print("--------------------------------------------------------------------------------------------------\n\n")
