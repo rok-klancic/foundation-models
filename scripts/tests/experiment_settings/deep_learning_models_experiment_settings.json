@@ -1,6 +1,6 @@
 {
     "n_beats_x": {
-        "model_name": "n_beats_x",
+        "model_name": "n_hits_multivariate",
         "additional_features": true,
         "test_len": 365,
         "val_len": 365,
