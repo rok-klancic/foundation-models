@@ -1,20 +1,7 @@
-import os
-
-import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
-
-import torch
-from transformers import AutoModelForCausalLM
-
-import joblib
-
 from sklearn.metrics import r2_score
 
-# Linear regression for the multivariate model
-
-from sklearn.linear_model import LinearRegression
-from sklearn.preprocessing import StandardScaler
+# Ridge regression
 from sklearn.linear_model import Ridge
 
 # Random forest
@@ -44,7 +31,7 @@ def hyperparameter_tuning(model_name,
                           val_len,
                           test_len,
                           aquifer_by_stations,
-                          time_moe_forecasts):
+                          time_moe_forecast_features):
     def objective(trial):
         if model_name == 'random_forest':
             n_estimators = trial.suggest_int('n_estimators', 10, 500)
@@ -58,10 +45,8 @@ def hyperparameter_tuning(model_name,
                                         n_jobs=-1,
                                         random_state=42)
         elif model_name == 'gradient_boosting':
-            #n_estimators = trial.suggest_int('n_estimators', 10, 500)
             max_iter = trial.suggest_int('max_iter', 10, 500)
             max_depth = trial.suggest_categorical('max_depth', [None, 10, 20, 30, 50])
-            #max_features = trial.suggest_categorical('max_features', ["sqrt", "log2", 0.5, 1.0])
             max_features = trial.suggest_categorical('max_features', [0.5, 0.75, 1.0])
             learning_rate = trial.suggest_categorical('learning_rate', [0.01, 0.05, 0.1, 0.2])
             
@@ -87,11 +72,17 @@ def hyperparameter_tuning(model_name,
         for aquifer in aquifers_list:
         
             for horizon in range (1, horizon_max+1, 1):
+                # Get the best features
+                # Check if the best features are aquifer specific or not
+                if aquifer in best_features.keys():
+                    chosen_features = best_features[aquifer][f'horizon_{horizon}']
+                else:
+                    chosen_features = best_features[f'horizon_{horizon}']
                 # Define the train and test set
-                X_train = aquifer_by_stations[aquifer][time_moe_forecasts + best_features[f'horizon_{horizon}']][:-(val_len + horizon + test_len)]
+                X_train = aquifer_by_stations[aquifer][time_moe_forecast_features + chosen_features][:-(val_len + horizon + test_len)]
                 y_train = aquifer_by_stations[aquifer][target_feature][horizon:-(val_len + test_len)]
         
-                X_test = aquifer_by_stations[aquifer][time_moe_forecasts + best_features[f'horizon_{horizon}']][-(val_len + horizon + test_len):-(horizon + test_len)]
+                X_test = aquifer_by_stations[aquifer][time_moe_forecast_features + chosen_features][-(val_len + horizon + test_len):-(horizon + test_len)]
                 y_test = aquifer_by_stations[aquifer][target_feature][-(val_len + test_len):-test_len]
         
                 # Train the model
@@ -116,7 +107,7 @@ def hyperparameter_tuning(model_name,
     
     # Run the optuna
     study = optuna.create_study(direction='maximize')
-    study.optimize(objective, n_trials=30)
+    study.optimize(objective, n_trials=50)
 
     # Return the best parameters
     return study.best_params
@@ -164,7 +155,7 @@ def final_training(model_name,
                    aquifer_by_stations,
                    best_features,
                    best_params,
-                   time_moe_forecasts):
+                   time_moe_forecast_features):
     # Initialize model
     if model_name == 'random_forest':
         model = RandomForestRegressor(n_estimators= best_params['n_estimators'],
@@ -179,7 +170,7 @@ def final_training(model_name,
                                               learning_rate= best_params['learning_rate'],
                                               random_state=42)
     elif model_name == 'ridge_regression':
-        model = Ridge(alpha= best_params['alpha'], n_jobs=-1)
+        model = Ridge(alpha= best_params['alpha'])
     else:
         raise ValueError(f"Model {model_name} not supported for final training")
 
@@ -202,10 +193,10 @@ def final_training(model_name,
                 chosen_features = best_features[f'horizon_{horizon}']
 
             # Define the train and test set
-            X_train = aquifer_by_stations[aquifer][time_moe_forecasts + chosen_features][:-(test_len + horizon)]
+            X_train = aquifer_by_stations[aquifer][time_moe_forecast_features + chosen_features][:-(test_len + horizon)]
             y_train = aquifer_by_stations[aquifer][target_feature][horizon:-test_len]
     
-            X_test = aquifer_by_stations[aquifer][time_moe_forecasts + chosen_features][-(test_len + horizon):-horizon]
+            X_test = aquifer_by_stations[aquifer][time_moe_forecast_features + chosen_features][-(test_len + horizon):-horizon]
             y_test = aquifer_by_stations[aquifer][target_feature][-test_len:]
     
             # Train the model
