@@ -28,7 +28,7 @@ warnings.filterwarnings('ignore')
 import json
 
 # Import functions for time_moe + statistical
-from time_moe_covariates_scripts import time_moe_stat
+from time_moe_covariates_scripts import time_moe_stat, stat_time_moe
 
 # Import time
 import time
@@ -116,6 +116,7 @@ for name, settings in experiment_settings.items():
         r2_average, r2_scores, predictions = time_moe_stat.final_training(model_name=model_name,
                                                                           aquifers_list=settings['aquifers_list'], 
                                                                           test_len=settings['test_len'], 
+                                                                          val_len=settings['val_len'],
                                                                           horizon_max=settings['horizon_max'],
                                                                           target_feature=settings['target_feature'],
                                                                           aquifer_by_stations=aquifer_by_stations,
@@ -127,8 +128,50 @@ for name, settings in experiment_settings.items():
         saving_name = f'{name}_{model_name}'
 
     elif name == 'statistical + time_moe':
-        # Call the script that uses this setup
-        pass
+        # Load the data
+        aquifer_by_stations = joblib.load('../../data/interim/ground-water-and-weather-with-weather-and-timemoe-forecasts-and-additional-features.joblib')
+        
+        # Feature selection
+        best_features = stat_time_moe.k_best_feature_selection(aquifers_list=settings['aquifers_list'],
+                                                               test_len=settings['test_len'], 
+                                                               horizon_max=settings['horizon_max'],
+                                                               target_feature=settings['target_feature'], 
+                                                               aquifer_by_stations=aquifer_by_stations,
+                                                               k=settings['k'])
+        
+        # Hyperparameter tuning
+        if model_name not in ['linear_regression']:
+            best_params = stat_time_moe.hyperparameter_tuning(model_name=model_name,
+                                                              horizon_max=settings['horizon_max'], 
+                                                              aquifers_list=settings['aquifers_list'], 
+                                                              best_features=best_features, 
+                                                              target_feature=settings['target_feature'], 
+                                                              test_len=settings['test_len'], 
+                                                              val_len=settings['val_len'],
+                                                              aquifer_by_stations=aquifer_by_stations)
+        else:
+            best_params = None
+
+        # Getting the residuals of the statistical models
+        residuals, statistical_predictions = stat_time_moe.final_training_statistical(model_name=model_name,
+                                                             aquifers_list=settings['aquifers_list'],
+                                                             test_len=settings['test_len'],
+                                                             val_len=settings['val_len'],
+                                                             horizon_max=settings['horizon_max'],
+                                                             target_feature=settings['target_feature'],
+                                                             aquifer_by_stations=aquifer_by_stations,
+                                                             best_features=best_features,
+                                                             best_params=best_params)
+        
+        # Final training
+        r2_average, r2_scores, predictions_by_stations = stat_time_moe.final_training_time_moe(horizon_max=settings['horizon_max'], 
+                                                                                              aquifers_list=settings['aquifers_list'], 
+                                                                                              test_len=settings['test_len'], 
+                                                                                              residuals=residuals, 
+                                                                                              context_length=settings['context_length'], 
+                                                                                              aquifer_by_stations=aquifer_by_stations, 
+                                                                                              statisctical_predictions=statistical_predictions)
+    
     elif name == 'linear_regression + Time-MoE + linear_regression':
         # Call the script that uses this setup
         pass

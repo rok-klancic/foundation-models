@@ -45,17 +45,23 @@ def hyperparameter_tuning(model_name,
                                         n_jobs=-1,
                                         random_state=42)
         elif model_name == 'gradient_boosting':
-            max_iter = trial.suggest_int('max_iter', 10, 500)
-            max_depth = trial.suggest_categorical('max_depth', [None, 10, 20, 30, 50])
+            max_depth = trial.suggest_categorical('max_depth', [3, 5, 7, 10, None])
             max_features = trial.suggest_categorical('max_features', [0.5, 0.75, 1.0])
             learning_rate = trial.suggest_categorical('learning_rate', [0.01, 0.05, 0.1, 0.2])
+            min_samples_leaf = trial.suggest_categorical('min_samples_leaf', [1, 5, 10, 20, 40, 60])
+            l2_regularization = trial.suggest_categorical('l2_regularization', [0, 1e-4, 1e-3, 1e-2, 1e-1, 1, 10])
+            n_iter_no_change = trial.suggest_categorical('n_iter_no_change', [10, 20, 30, 40, 50])
             
             
-            # Initialize the RandomForestClassifier
-            model = HistGradientBoostingRegressor(max_iter=max_iter, 
+            # Initialize the HistGradientBoostingRegressor
+            model = HistGradientBoostingRegressor(max_iter=500, 
                                                   max_depth=max_depth,
                                                   max_features=max_features,
                                                   learning_rate=learning_rate,
+                                                  min_samples_leaf=min_samples_leaf,
+                                                  l2_regularization=l2_regularization,
+                                                  early_stopping=True,
+                                                  n_iter_no_change=n_iter_no_change,
                                                   random_state=42)
         
         elif model_name == 'ridge_regression':
@@ -78,6 +84,7 @@ def hyperparameter_tuning(model_name,
                     chosen_features = best_features[aquifer][f'horizon_{horizon}']
                 else:
                     chosen_features = best_features[f'horizon_{horizon}']
+                
                 # Define the train and test set
                 X_train = aquifer_by_stations[aquifer][time_moe_forecast_features + chosen_features][:-(val_len + horizon + test_len)]
                 y_train = aquifer_by_stations[aquifer][target_feature][horizon:-(val_len + test_len)]
@@ -86,7 +93,10 @@ def hyperparameter_tuning(model_name,
                 y_test = aquifer_by_stations[aquifer][target_feature][-(val_len + test_len):-test_len]
         
                 # Train the model
-                model.fit(X_train, y_train)
+                if model_name != 'gradient_boosting':
+                    model.fit(X_train, y_train)
+                else:
+                    model.fit(X_train, y_train, X_val=X_test, y_val=y_test)
         
                 # Make predictions
                 forecast = model.predict(X_test).tolist()
@@ -150,6 +160,7 @@ def k_best_feature_selection(aquifers_list, test_len, horizon_max, target_featur
 def final_training(model_name,
                    aquifers_list,
                    test_len,
+                   val_len,
                    horizon_max,
                    target_feature,
                    aquifer_by_stations,
@@ -164,10 +175,14 @@ def final_training(model_name,
                                  n_jobs=-1,
                                  random_state=42)
     elif model_name == 'gradient_boosting':
-        model = HistGradientBoostingRegressor(max_iter= best_params['max_iter'],
+        model = HistGradientBoostingRegressor(max_iter= 500,
                                               max_depth= best_params['max_depth'],
                                               max_features= best_params['max_features'],
                                               learning_rate= best_params['learning_rate'],
+                                              min_samples_leaf= best_params['min_samples_leaf'],
+                                              l2_regularization= best_params['l2_regularization'],
+                                              n_iter_no_change= best_params['n_iter_no_change'],
+                                              early_stopping=True,
                                               random_state=42)
     elif model_name == 'ridge_regression':
         model = Ridge(alpha= best_params['alpha'])
@@ -178,8 +193,8 @@ def final_training(model_name,
     # List for r2 results for different prediction horizons
     r2_scores = [[] for _ in range(horizon_max)]
     
-    # List for storing the predictions (useful for visualization)
-    predictions = []
+    # Dictionary for storing the predictions
+    predictions_by_stations = {key: [] for key in aquifers_list}
     
     for aquifer in aquifers_list:
         predictions = [] # make sure that the list is empty for every aquifer
@@ -193,14 +208,28 @@ def final_training(model_name,
                 chosen_features = best_features[f'horizon_{horizon}']
 
             # Define the train and test set
-            X_train = aquifer_by_stations[aquifer][time_moe_forecast_features + chosen_features][:-(test_len + horizon)]
-            y_train = aquifer_by_stations[aquifer][target_feature][horizon:-test_len]
-    
-            X_test = aquifer_by_stations[aquifer][time_moe_forecast_features + chosen_features][-(test_len + horizon):-horizon]
-            y_test = aquifer_by_stations[aquifer][target_feature][-test_len:]
+            if model_name != 'gradient_boosting':
+                X_train = aquifer_by_stations[aquifer][time_moe_forecast_features + chosen_features][:-(test_len + horizon)]
+                y_train = aquifer_by_stations[aquifer][target_feature][horizon:-test_len]
+        
+                X_test = aquifer_by_stations[aquifer][time_moe_forecast_features + chosen_features][-(test_len + horizon):-horizon]
+                y_test = aquifer_by_stations[aquifer][target_feature][-test_len:]
+
+            else:
+                X_train = aquifer_by_stations[aquifer][time_moe_forecast_features + chosen_features][:-(val_len + horizon + test_len)]
+                y_train = aquifer_by_stations[aquifer][target_feature][horizon:-(val_len + test_len)]
+                
+                X_val = aquifer_by_stations[aquifer][time_moe_forecast_features + chosen_features][-(val_len + horizon + test_len):-(horizon + test_len)]
+                y_val = aquifer_by_stations[aquifer][target_feature][-(val_len + test_len):-test_len]
+                
+                X_test = aquifer_by_stations[aquifer][time_moe_forecast_features + chosen_features][-(test_len + horizon):-horizon]
+                y_test = aquifer_by_stations[aquifer][target_feature][-test_len:]
     
             # Train the model
-            model.fit(X_train, y_train)
+            if model_name != 'gradient_boosting':
+                model.fit(X_train, y_train)
+            else:
+                model.fit(X_train, y_train, X_val=X_val, y_val=y_val)
     
             # Make predictions
             forecast = model.predict(X_test).tolist()
@@ -211,9 +240,12 @@ def final_training(model_name,
             # Calculate and save the r2 score
             r2_scores[horizon-1].append(r2_score(y_test, forecast))
 
+        # Store the predictions to the dictionary
+        predictions_by_stations[aquifer].append(predictions)
+
     # Return the average r2 scores
     r2_average =  []    
     for i in range(horizon_max):
         r2_average.append(np.mean(r2_scores[i]))
 
-    return r2_average, r2_scores, predictions
+    return r2_average, r2_scores, predictions_by_stations
