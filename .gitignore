@@ -200,6 +200,6 @@ data/external/
 notebooks/aquifer_with_time_moe_forecasts.joblib
 deep_learning_venv/
 scripts/tests/checkpoints/
-time_moe_venv/
+/time_moe_venv/
 /neural_networks_py3.10_venv/
 /.python-version
