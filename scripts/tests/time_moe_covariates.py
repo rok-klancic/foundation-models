@@ -28,11 +28,10 @@ warnings.filterwarnings('ignore')
 import json
 
 # Import functions for time_moe + statistical
-from time_moe_covariates_scripts import time_moe_stat, stat_time_moe
+from time_moe_covariates_scripts import time_moe_stat, stat_time_moe, stat_timeMoe_stat
 
 # Import time
 import time
-
 
 # SAVING THE RESULTS
 # ----------------------------------------------------------------------------------------------------------------------
@@ -172,9 +171,75 @@ for name, settings in experiment_settings.items():
                                                                                               aquifer_by_stations=aquifer_by_stations, 
                                                                                               statisctical_predictions=statistical_predictions)
     
-    elif name == 'linear_regression + Time-MoE + linear_regression':
-        # Call the script that uses this setup
-        pass
+    elif name == 'statistical + Time-MoE + statistical':
+        # Load the data
+        aquifer_by_stations = joblib.load('../../data/interim/ground-water-and-weather-with-additional-features.joblib')
+
+        # Feature selection
+        best_features = stat_timeMoe_stat.k_best_feature_selection(aquifers_list=settings['aquifers_list'],
+                                                               test_len=settings['test_len'], 
+                                                               horizon_max=settings['horizon_max'],
+                                                               target_feature=settings['target_feature'], 
+                                                               aquifer_by_stations=aquifer_by_stations,
+                                                               k=settings['k'])
+        
+        # Initial hyperparameter tuning
+        if model_name not in ['linear_regression']:
+            best_params_init  = stat_timeMoe_stat.hyperparameter_tuning_initial(model_name=model_name,
+                                                                                horizon_max=settings['horizon_max'],
+                                                                                aquifers_list=settings['aquifers_list'],
+                                                                                best_features=best_features,
+                                                                                target_feature=settings['target_feature'],
+                                                                                test_len=settings['test_len'],
+                                                                                val_len=settings['val_len'],
+                                                                                aquifer_by_stations=aquifer_by_stations)
+        else:
+            best_params_init = None
+
+        # Initial predictions
+        statistical_predictions = stat_timeMoe_stat.prediction_initial(model_name=model_name,
+                                                                       aquifers_list=settings['aquifers_list'],
+                                                                       test_len=settings['test_len'],
+                                                                       val_len=settings['val_len'],
+                                                                       horizon_max=settings['horizon_max'],
+                                                                       target_feature=settings['target_feature'],
+                                                                       aquifer_by_stations=aquifer_by_stations,
+                                                                       best_features=best_features,
+                                                                       best_params=best_params_init)
+        # Load the Time-MoE predictions
+        time_moe_predictions = joblib.load('../../data/interim/ground-water-and-weather-with-weather-and-timemoe-forecasts-and-additional-features.joblib')
+        
+        # Time-MoE forecast features
+        time_moe_forecast_features = ['forecast_altitude_diff_0',
+                                      'forecast_altitude_diff_1',
+                                      'forecast_altitude_diff_2',
+                                      'forecast_altitude_diff_3',
+                                      'forecast_altitude_diff_4']
+        # Final hyperparameter tuning
+        if model_name not in ['linear_regression']:
+            best_params_final = stat_timeMoe_stat.hyperparameter_tuning_final(model_name=model_name,
+                                                                          horizon_max=settings['horizon_max'],
+                                                                          aquifers_list=settings['aquifers_list'],
+                                                                          target_feature=settings['target_feature'],
+                                                                          test_len=settings['test_len'],
+                                                                          val_len=settings['val_len'],
+                                                                          aquifer_by_stations=time_moe_predictions,
+                                                                          statistical_predictions=statistical_predictions,
+                                                                          time_moe_forecast_features=time_moe_forecast_features)
+        else:
+            best_params_final = None               
+        # Final training
+        r2_average, r2_scores, predictions_by_stations = stat_timeMoe_stat.final_training(model_name=model_name,
+                                                                                          aquifers_list=settings['aquifers_list'],
+                                                                                          test_len=settings['test_len'],
+                                                                                          val_len=settings['val_len'],
+                                                                                          horizon_max=settings['horizon_max'],
+                                                                                          target_feature=settings['target_feature'],
+                                                                                          aquifer_by_stations=time_moe_predictions,
+                                                                                          statistical_predictions=statistical_predictions,
+                                                                                          best_params=best_params_final,
+                                                                                          time_moe_forecast_features=time_moe_forecast_features)
+
     elif name == 'hidden_layer + linear_regression':
         # Call the script that uses this setup
         pass
