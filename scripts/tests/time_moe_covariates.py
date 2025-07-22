@@ -186,10 +186,12 @@ for name, settings in experiment_settings.items():
                                                                                               context_length=settings['context_length'], 
                                                                                               aquifer_by_stations=aquifer_by_stations, 
                                                                                               statisctical_predictions=statistical_predictions)
-    
+        # Define the name for the results file
+        saving_name = f'{name}_{model_name}'
+
     elif name == 'statistical + Time-MoE + statistical':
         # Load the data
-        aquifer_by_stations = joblib.load('../../data/interim/ground-water-and-weather-with-additional-features.joblib')
+        aquifer_by_stations = joblib.load('../../data/interim/ground-water-and-weather-with-forecasts-and-additional-features.joblib')
 
         # Feature selection
         best_features = stat_timeMoe_stat.k_best_feature_selection(aquifers_list=settings['aquifers_list'],
@@ -245,7 +247,7 @@ for name, settings in experiment_settings.items():
         else:
             best_params_final = None               
         # Final training
-        r2_average, r2_scores, predictions_by_stations = stat_timeMoe_stat.final_training(model_name=model_name,
+        r2_average, r2_scores, predictions = stat_timeMoe_stat.final_training(model_name=model_name,
                                                                                           aquifers_list=settings['aquifers_list'],
                                                                                           test_len=settings['test_len'],
                                                                                           val_len=settings['val_len'],
@@ -255,6 +257,10 @@ for name, settings in experiment_settings.items():
                                                                                           statistical_predictions=statistical_predictions,
                                                                                           best_params=best_params_final,
                                                                                           time_moe_forecast_features=time_moe_forecast_features)
+        # Define the name for the results file
+        saving_name = f'{name}_{model_name}'
+        # Fix the name of the best_params_final for the saving
+        best_params = best_params_final
 
     elif name == 'hidden_layer + linear_regression':
         # Call the script that uses this setup

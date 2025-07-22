@@ -1,5 +1,5 @@
 {
-    "statistical + time_moe": {
+    "statistical + Time-MoE + statistical": {
         "model_name": "linear_regression",
         "k": 80,
         "test_len": 365,
