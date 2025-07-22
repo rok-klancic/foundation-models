@@ -126,7 +126,7 @@ def hyperparameter_tuning_initial(model_name,
     
     # Run the optuna
     study = optuna.create_study(direction='maximize')
-    study.optimize(objective, n_trials=50)
+    study.optimize(objective, n_trials=30)
 
     # Return the best parameters
     return study.best_params
@@ -222,7 +222,7 @@ def hyperparameter_tuning_final(model_name,
     
     # Run the optuna
     study = optuna.create_study(direction='maximize')
-    study.optimize(objective, n_trials=50)
+    study.optimize(objective, n_trials=30)
 
     # Return the best parameters
     return study.best_params
@@ -411,7 +411,7 @@ def final_training(model_name,
                 temp = pd.DataFrame({'a': aquifer_by_stations[aquifer][time_moe_forecast_features[horizon-1]][-(TEST_LEN_MULTIPLIER * test_len + horizon):-(horizon)].values,
                                      'b': statistical_predictions[aquifer][horizon-1],
                                      'target': aquifer_by_stations[aquifer][target_feature][-(TEST_LEN_MULTIPLIER * test_len + horizon):-(horizon)].values})
-                X_train = temp[['a', 'b']][:-(val_len + test_len + horizon)]
+                X_train = temp[['a', 'b']][:-(test_len + horizon)]
                 y_train = temp['target'][horizon:-test_len]
                 
                 X_test = temp[['a', 'b']][-(test_len + horizon):-horizon]

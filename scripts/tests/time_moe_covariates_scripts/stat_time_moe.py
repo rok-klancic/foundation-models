@@ -258,7 +258,7 @@ def final_training_statistical(model_name,
             r2_scores[horizon-1].append(r2_score(y_test, forecast))
 
         # Store the predictions to the dictionary
-        predictions_by_stations[aquifer].append(predictions)
+        predictions_by_stations[aquifer] = predictions
 
     # Calculate the residuals
     # Shorten the data length to the prediction length
@@ -333,16 +333,16 @@ def final_training_time_moe(horizon_max,
             predictions[i] = statisctical_predictions[aquifer][i][-test_len:] + np.array(predictions[i])
 
         # Store the predictions to the dictionary
-        predictions_by_stations[aquifer].append(predictions)
+        predictions_by_stations[aquifer] = predictions
     
         # Calculate the r2 scores and store them in a list
         for i in range(horizon_max):
             r2_scores[i].append(r2_score(aquifer_by_stations[aquifer]['altitude_diff'][-test_len:], predictions[i]))
 
-        # Return the average r2 scores
-        r2_average =  []    
-        for i in range(horizon_max):
-            r2_average.append(np.mean(r2_scores[i]))
-    
+    # Return the average r2 scores
+    r2_average =  []    
+    for i in range(horizon_max):
+        r2_average.append(np.mean(r2_scores[i]))
+
     # Return the predictions and the r2 scores
     return r2_average, r2_scores, predictions_by_stations
