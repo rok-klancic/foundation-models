@@ -28,7 +28,7 @@ warnings.filterwarnings('ignore')
 import json
 
 # Import functions for time_moe + statistical
-from time_moe_covariates_scripts import time_moe_stat, stat_time_moe, stat_timeMoe_stat, hidden_statistical
+from time_moe_covariates_scripts import time_moe_stat, stat_time_moe, stat_timeMoe_stat, hidden_statistical, hidden_mlp
 
 # Import time
 import time
@@ -305,8 +305,46 @@ for name, settings in experiment_settings.items():
         saving_name = f'{name}_{model_name}'
 
     elif name == 'hidden_layer + MLP':
-        # Call the script that uses this setup
-        pass
+        # Load the data
+        aquifer_by_stations = joblib.load('../../data/interim/ground-water-and-weather-with-forecasts-and-additional-features.joblib')
+        time_moe_outputs = joblib.load('../../data/interim/time_moe_outputs.joblib')
+        
+        # Feature selection
+        best_features = hidden_mlp.k_best_feature_selection(aquifers_list=settings['aquifers_list'],
+                                                                   test_len=settings['test_len'],
+                                                                   horizon_max=settings['horizon_max'],
+                                                                   target_feature=settings['target_feature'],
+                                                                   aquifer_by_stations=aquifer_by_stations,
+                                                                   k=settings['k'])
+        
+        # Hyperparameter tuning
+        if model_name not in ['linear_regression']:
+            best_params = hidden_mlp.hyperparameter_tuning(model_name=model_name,
+                                                           horizon_max=settings['horizon_max'],
+                                                           aquifers_list=settings['aquifers_list'],
+                                                           best_features=best_features,
+                                                           target_feature=settings['target_feature'],
+                                                           test_len=settings['test_len'],
+                                                           val_len=settings['val_len'],
+                                                           aquifer_by_stations=aquifer_by_stations,
+                                                           time_moe_outputs=time_moe_outputs)
+        else:
+            best_params = None
+        
+        # Final training
+        r2_average, r2_scores, predictions = hidden_mlp.final_training(model_name=model_name,
+                                                                              aquifers_list=settings['aquifers_list'],
+                                                                              test_len=settings['test_len'],
+                                                                              val_len=settings['val_len'],
+                                                                              horizon_max=settings['horizon_max'],
+                                                                              target_feature=settings['target_feature'],
+                                                                              aquifer_by_stations=aquifer_by_stations,
+                                                                              best_features=best_features,
+                                                                              best_params=best_params,
+                                                                              time_moe_outputs=time_moe_outputs)
+        
+        # Define the name for the results file
+        saving_name = f'{name}_{model_name}'
     elif name == 'hidden_layer + NBEATSx':
         # Call the script that uses this setup
         pass
