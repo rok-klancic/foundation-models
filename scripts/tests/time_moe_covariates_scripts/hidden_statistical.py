@@ -121,7 +121,13 @@ def hyperparameter_tuning(model_name,
         
                 # Make predictions
                 forecast = model.predict(X_test).tolist()
+
+                # Flatten
+                forecast = np.ravel(forecast)
                 
+                # Unscale the predictions
+                forecast = scaler_y.inverse_transform(forecast.reshape(-1, 1)).ravel()
+
                 # Calculate and save the r2 score
                 r2_scores[horizon-1].append(r2_score(y_test, forecast))
         
@@ -138,7 +144,7 @@ def hyperparameter_tuning(model_name,
     
     # Run the optuna
     study = optuna.create_study(direction='maximize')
-    study.optimize(objective, n_trials=50)
+    study.optimize(objective, n_trials=30)
 
     # Return the best parameters
     return study.best_params
@@ -299,6 +305,12 @@ def final_training(model_name,
     
             # Make predictions
             forecast = model.predict(X_test).tolist()
+
+            # Flatten
+            forecast = np.ravel(forecast)
+
+            # Unscale the predictions
+            forecast = scaler_y.inverse_transform(forecast.reshape(-1, 1)).ravel()
     
             # Store to the predictions
             predictions.append(forecast)
