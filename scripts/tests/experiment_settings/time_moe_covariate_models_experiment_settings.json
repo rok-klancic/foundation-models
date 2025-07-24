@@ -1,5 +1,5 @@
 {
-    "statistical + Time-MoE + statistical": {
+    "hidden_layer + statistical": {
         "model_name": "linear_regression",
         "k": 80,
         "test_len": 365,
