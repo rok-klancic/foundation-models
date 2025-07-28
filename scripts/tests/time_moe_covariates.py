@@ -28,7 +28,7 @@ warnings.filterwarnings('ignore')
 import json
 
 # Import functions for time_moe + statistical
-from time_moe_covariates_scripts import time_moe_stat, stat_time_moe, stat_timeMoe_stat, hidden_statistical, hidden_mlp
+from time_moe_covariates_scripts import time_moe_stat, stat_time_moe, stat_timeMoe_stat, hidden_statistical, hidden_mlp, hidden_nbeatsx
 
 # Import time
 import time
@@ -346,8 +346,46 @@ for name, settings in experiment_settings.items():
         # Define the name for the results file
         saving_name = f'{name}_{model_name}'
     elif name == 'hidden_layer + NBEATSx':
-        # Call the script that uses this setup
-        pass
+        # Load the data
+        aquifer_by_stations = joblib.load('../../data/interim/ground-water-and-weather-with-forecasts-and-additional-features.joblib')
+        # Shift the forecast features in the data
+        aquifer_by_stations = hidden_nbeatsx.shift_data(aquifers_list=settings['aquifers_list'],
+                                                       aquifer_by_stations=aquifer_by_stations,
+                                                       horizon_max=settings['horizon_max'])
+        
+        # Get the time moe outputs
+        time_moe_outputs = joblib.load('../../data/interim/time_moe_outputs.joblib')
+        # Convert to dataframes and add dates
+        time_moe_outputs = hidden_nbeatsx.time_moe_outputs_preprocess(time_moe_outputs)
+        # Get the feature names
+        time_moe_features = hidden_nbeatsx.get_time_moe_feature_names(time_moe_outputs)
+
+        # Hyperparameter tuning
+        best_params = hidden_nbeatsx.hyperparameter_tuning(model_name=model_name,
+                                                          horizon_max=settings['horizon_max'],
+                                                          aquifers_list=settings['aquifers_list'],
+                                                          best_features=best_features,
+                                                          target_feature=settings['target_feature'],
+                                                          test_len=settings['test_len'],
+                                                          val_len=settings['val_len'],
+                                                          aquifer_by_stations=aquifer_by_stations,
+                                                          time_moe_outputs=time_moe_outputs,
+                                                          time_moe_features=time_moe_features)
+        
+        # Final training
+        r2_average, r2_scores, predictions = hidden_nbeatsx.final_training(model_name=model_name,
+                                                                          aquifers_list=settings['aquifers_list'],
+                                                                          test_len=settings['test_len'],
+                                                                          horizon_max=settings['horizon_max'],
+                                                                          target_feature=settings['target_feature'],
+                                                                          aquifer_by_stations=aquifer_by_stations,
+                                                                          best_params=best_params,
+                                                                          time_moe_outputs=time_moe_outputs,
+                                                                          time_moe_features=time_moe_features)
+        
+        # Define the name for the results file
+        saving_name = f'{name}_{model_name}'
+
     else:
         raise ValueError(f"Model {name} not found")
     
