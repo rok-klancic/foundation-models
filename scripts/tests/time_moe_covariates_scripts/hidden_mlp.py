@@ -106,9 +106,9 @@ def hyperparameter_tuning(model_name,
                                                                         [128, 64, 32], [64, 32, 16], [256, 128, 64],
                                                                         [128, 64, 32, 16], [256, 128, 64, 32], [512, 256, 128, 64]])
             dropout = trial.suggest_categorical('dropout', [0.0, 0.1, 0.2, 0.5])
-            patience = trial.suggest_categorical('patience', [5, 10, 25,50])
+            patience = trial.suggest_categorical('patience', [5, 10, 25, 50, 100])
             lr = trial.suggest_loguniform('lr', 1e-4, 1e-1)
-            weight_decay = trial.suggest_loguniform('weight_decay', [1e-4, 1e-3, 1e-2, 5e-1, 1e-1, 0, 1, 10])
+            weight_decay = trial.suggest_categorical('weight_decay', [0, 1e-4, 1e-3, 1e-2, 5e-1, 1e-1, 1, 10])
 
 
         else:
@@ -150,12 +150,13 @@ def hyperparameter_tuning(model_name,
                 X_train = scaler_X.fit_transform(X_train)
                 X_test = scaler_X.transform(X_test)
                 y_train = scaler_y.fit_transform(y_train.values.reshape(-1, 1)).ravel()
+                y_test_scaled = scaler_y.transform(y_test.values.reshape(-1, 1)).ravel()
 
                 # Convert to PyTorch tensors
                 X_train_tensor = torch.FloatTensor(X_train)
                 y_train_tensor = torch.FloatTensor(y_train).reshape(-1, 1)
                 X_test_tensor = torch.FloatTensor(X_test)
-                y_test_tensor = torch.FloatTensor(y_test).reshape(-1, 1)
+                y_test_tensor = torch.FloatTensor(y_test_scaled).reshape(-1, 1)
 
                 # Initialize model, loss function and optimizer
                 model = MLP(input_size=X_train.shape[1],
@@ -328,7 +329,7 @@ def final_training(model_name,
             model = mlp_fit(model=model,
                             X_train=X_train_tensor,
                             y_train=y_train_tensor,
-                            X_val=X_test_tensor,
+                            X_val=X_val_tensor,
                             y_val=y_val_tensor,
                             patience=best_params['patience'],
                             criterion=criterion,

@@ -1,12 +1,11 @@
 {
-    "hidden_layer + statistical": {
-        "model_name": "linear_regression",
+    "hidden_layer + MLP": {
+        "model_name": "mlp",
         "k": 80,
         "test_len": 365,
         "val_len": 365,
         "horizon_max": 5,
         "target_feature": "altitude_diff",
-        "aquifers_list": [85065, 85064],
-        "context_length": 730
+        "aquifers_list": [85065, 85064]
     }
 }
