@@ -1,0 +1,12 @@
+{
+    "type": "hidden_layer + deep_learning",
+    "model_name": "n_beats_x",
+    "r2_scores": [
+        [
+            0.8485590255002253
+        ]
+    ],
+    "predictions": {
+        "85065": [
+            [
+                

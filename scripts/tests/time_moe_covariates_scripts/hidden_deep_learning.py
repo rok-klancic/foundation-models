@@ -1,35 +1,21 @@
 # IMPORT THE NECESSARY LIBRARIES
 # ----------------------------------------------------------------------------------------------------------------------
 # N-BEATS, PatchTST
-from neuralforecast.models import NBEATS, PatchTST, NBEATSx, NHITS
-from neuralforecast.losses.pytorch import HuberLoss
+from neuralforecast.models import NBEATSx, NHITS
 from neuralforecast.core import NeuralForecast
 import joblib
 import pandas as pd
 import numpy as np
-import json
-from sklearn.metrics import r2_score, make_scorer
-from sklearn.base import BaseEstimator, RegressorMixin
-from sklearn.model_selection import RandomizedSearchCV
-from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import r2_score
 # Hyperparameter tuning
 import optuna
-# N-HiTS
-from darts import TimeSeries
-from darts.models import NHiTSModel
-from torch.nn import MSELoss
-# DeepAR
-from gluonts.dataset.pandas import PandasDataset
-from gluonts.torch.model.deepar import DeepAREstimator
-from lightning.pytorch.callbacks import ModelCheckpoint
-import os
+
 # Warnings
 import warnings
 warnings.filterwarnings('ignore')
 # Import torch
 import torch
-# Import time
-import time
+
 
 # CONSTANTS
 # ----------------------------------------------------------------------------------------------------------------------
@@ -466,7 +452,9 @@ def time_moe_outputs_preprocess(time_moe_outputs):
 # Get the feature names of the time moe outputs
 def get_time_moe_feature_names(time_moe_outputs):
     aquifer = list(time_moe_outputs.keys())[0]
-    return time_moe_outputs[aquifer].columns.tolist()
+    features = time_moe_outputs[aquifer].columns.tolist()
+    features.remove(DATE)
+    return features
 
 # Shift the data
 # Instead of having predictions on the day they were created,

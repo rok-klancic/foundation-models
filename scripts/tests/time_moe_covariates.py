@@ -60,13 +60,23 @@ def convert_ndarray_to_list(obj):
         return [convert_ndarray_to_list(item) for item in obj]
     else:
         return obj
+    
+def convert_numpy_to_native(obj):
+    if isinstance(obj, dict):
+        return {k: convert_numpy_to_native(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_numpy_to_native(i) for i in obj]
+    elif isinstance(obj, np.generic):
+        return obj.item()
+    else:
+        return obj
 
 def save_results(type, model_name, r2_scores, predictions, best_features, best_params, file_path, time_string):
     # Ensure lists
-    predictions = convert_ndarray_to_list(predictions)
-    r2_scores = convert_ndarray_to_list(r2_scores)
-    best_features = convert_ndarray_to_list(best_features)
-    best_params = convert_ndarray_to_list(best_params)
+    predictions = convert_numpy_to_native(convert_ndarray_to_list(predictions))
+    r2_scores = convert_numpy_to_native(convert_ndarray_to_list(r2_scores))
+    best_features = convert_numpy_to_native(convert_ndarray_to_list(best_features))
+    best_params = convert_numpy_to_native(convert_ndarray_to_list(best_params))
 
     # Create a dictionary to store the results
     results = {
@@ -360,11 +370,13 @@ for name, settings in experiment_settings.items():
         # Get the feature names
         time_moe_features = hidden_deep_learning.get_time_moe_feature_names(time_moe_outputs)
 
+        # Set the best features to [] for the json saving
+        best_features = []
+
         # Hyperparameter tuning
         best_params = hidden_deep_learning.hyperparameter_tuning(model_name=model_name,
                                                           horizon_max=settings['horizon_max'],
                                                           aquifers_list=settings['aquifers_list'],
-                                                          best_features=best_features,
                                                           target_feature=settings['target_feature'],
                                                           test_len=settings['test_len'],
                                                           val_len=settings['val_len'],
