@@ -1,22 +1,10 @@
 {
-    "random_forest_multivariate": {
-        "model_name": "random_forest",
-        "additional_features": true,
-        "hyperparameter_tuning": true,
-        "feature_selection": "k_best",
-        "k": 80,
-        "test_len": 365,
-        "val_len": 365,
-        "horizon_max": 5,
-        "target_feature": "altitude_diff",
-        "aquifers_list": [85065, 85064]
-    },
-    "ridge_regression_multivariate": {
+    "ridge_regression_univariate": {
         "model_name": "ridge_regression",
-        "additional_features": true,
+        "additional_features": false,
         "hyperparameter_tuning": true,
-        "feature_selection": "k_best",
-        "k": 80,
+        "feature_selection": null,
+        "k": null,
         "test_len": 365,
         "val_len": 365,
         "horizon_max": 5,

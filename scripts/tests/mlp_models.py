@@ -11,6 +11,9 @@ from sklearn.preprocessing import StandardScaler
 import matplotlib.pyplot as plt
 import optuna
 import json
+# Torch
+import torch
+import torch.nn as nn
 # RandomForest
 from sklearn.ensemble import RandomForestRegressor
 # GradientBoostingRegressor
@@ -30,49 +33,91 @@ from sklearn.feature_selection import SelectKBest, f_regression
 # Time
 import time
 
+# CONSTANTS
+# ----------------------------------------------------------------------------------------------------------------------
+MAX_EPOCHS = 5000
+EXPERIMENT_SETTINGS_PATH = 'experiment_settings/mlp_models_experiment_settings.json'
+DATA_PATH = '../../data/interim/ground-water-and-weather-with-forecasts-and-additional-features.joblib'
+RESULTS_PATH = '../results/mlp_models'
+
+
+# MLP MODEL
+# able to change the number of hidden layers and the dropout rate
+# ----------------------------------------------------------------------------------------------------------------------
+class MLP(nn.Module):
+    def __init__(self, input_size, hidden_layers, dropout):
+        super(MLP, self).__init__()
+        layers = []
+        in_features = input_size
+
+        for hidden_size in hidden_layers:
+            layers.append(nn.Linear(in_features, hidden_size))
+            layers.append(nn.ReLU())
+            layers.append(nn.Dropout(dropout))
+            in_features = hidden_size
+
+        layers.append(nn.Linear(in_features, 1))  # Output layer
+        self.layers = nn.Sequential(*layers)
+
+    def forward(self, x):
+        return self.layers(x)
+
+# Method for training the model
+def mlp_fit(model, X_train, y_train, X_val, y_val, patience, criterion, optimizer, horizon):
+    # Training loop with early stopping
+    model.train()
+    best_val_loss = float('inf')
+    patience_counter = 0
+
+    for epoch in range(MAX_EPOCHS):
+        # Training
+        optimizer.zero_grad()
+        outputs = model(X_train)
+        train_loss = criterion(outputs, y_train)
+        train_loss.backward()
+        optimizer.step()
+
+        # Validation
+        model.eval()
+        with torch.no_grad():
+            val_outputs = model(X_val)
+            val_loss = criterion(val_outputs, y_val)
+
+        model.train()
+
+        # Early stopping check
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            patience_counter = 0
+            # Save best model
+            best_model_state = model.state_dict().copy()
+        else:
+            patience_counter += 1
+
+        if patience_counter >= patience:
+            print(f"Early stopping triggered at epoch {epoch+1} for horizon {horizon}")
+            # Load best model
+            model.load_state_dict(best_model_state)
+            return model
+    
+    # Load best model
+    model.load_state_dict(best_model_state)
+    return model
+
 
 # HYPERPARAMETER TUNING
 # ----------------------------------------------------------------------------------------------------------------------
 def hyperparameter_tuning(model_name, horizon_max, aquifers_list, best_features, target_feature, val_len, test_len, aquifer_by_stations):
     def objective(trial):
-        if model_name == 'random_forest':
-            n_estimators = trial.suggest_int('n_estimators', 10, 500)
-            max_depth = trial.suggest_categorical('max_depth', [None, 10, 20, 30, 50])
-            max_features = trial.suggest_categorical('max_features', ["sqrt", "log2", 0.5, 1.0])
-            min_samples_split = trial.suggest_int('min_samples_split', 2, 10)
-            min_samples_leaf = trial.suggest_int('min_samples_leaf', 1, 10)
-    
-            # Initialize the RandomForestClassifier
-            model = RandomForestRegressor(n_estimators=n_estimators,
-                                        max_depth=max_depth,
-                                        max_features=max_features,
-                                        min_samples_split=min_samples_split,
-                                        min_samples_leaf=min_samples_leaf,
-                                        n_jobs=-1,
-                                        random_state=42)
-        elif model_name == 'gradient_boosting':
-            max_depth = trial.suggest_categorical('max_depth', [3, 5, 7, 10, None])
-            max_features = trial.suggest_categorical('max_features', [0.5, 0.75, 1.0])
-            learning_rate = trial.suggest_categorical('learning_rate', [0.01, 0.05, 0.1, 0.2])
-            min_samples_leaf = trial.suggest_categorical('min_samples_leaf', [1, 5, 10, 20, 40, 60])
-            l2_regularization = trial.suggest_categorical('l2_regularization', [0, 1e-4, 1e-3, 1e-2, 1e-1, 1, 10])
-            n_iter_no_change = trial.suggest_categorical('n_iter_no_change', [10, 20, 30, 40, 50])
-            
-            # Initialize the HistGradientBoostingRegressor
-            model = HistGradientBoostingRegressor(max_iter=500, 
-                                                  max_depth=max_depth,
-                                                  max_features=max_features,
-                                                  learning_rate=learning_rate,
-                                                  min_samples_leaf=min_samples_leaf,
-                                                  l2_regularization=l2_regularization,
-                                                  early_stopping=True,
-                                                  n_iter_no_change=n_iter_no_change,
-                                                  random_state=42)
-            
-        elif model_name == 'ridge_regression':
-              alpha = trial.suggest_float('alpha', 1e-4, 100.0, log=True)
-
-              model = Ridge(alpha=alpha)
+        if model_name == 'mlp':
+                    hidden_layers = trial.suggest_categorical('hidden_layers', [[64], [32],
+                                                                                [32, 16], [64, 32], [128, 64],
+                                                                                [128, 64, 32], [64, 32, 16], [256, 128, 64],
+                                                                                [128, 64, 32, 16], [256, 128, 64, 32], [512, 256, 128, 64]])
+                    dropout = trial.suggest_categorical('dropout', [0.0, 0.1, 0.2, 0.5])
+                    patience = trial.suggest_categorical('patience', [5, 10, 25, 50, 100])
+                    lr = trial.suggest_loguniform('lr', 1e-4, 1e-1)
+                    weight_decay = trial.suggest_categorical('weight_decay', [0, 1e-4, 1e-3, 1e-2, 5e-1, 1e-1, 1, 10])
             
         else:
             raise ValueError(f"Model {model_name} not supported for hyperparameter tuning")
@@ -97,14 +142,50 @@ def hyperparameter_tuning(model_name, horizon_max, aquifers_list, best_features,
                 X_test = aquifer_by_stations[aquifer][chosen_features][-(val_len + horizon + test_len):-(horizon + test_len)]
                 y_test = aquifer_by_stations[aquifer][target_feature][-(val_len + test_len):-test_len]
         
+                # Define the scaler
+                scaler_X = StandardScaler()
+                scaler_y = StandardScaler()
+
+                # Scale the features
+                X_train = scaler_X.fit_transform(X_train)
+                X_test = scaler_X.transform(X_test)
+                y_train = scaler_y.fit_transform(y_train.values.reshape(-1, 1)).ravel()
+                y_test_scaled = scaler_y.transform(y_test.values.reshape(-1, 1)).ravel()
+
+                # Convert to PyTorch tensors
+                X_train_tensor = torch.FloatTensor(X_train)
+                y_train_tensor = torch.FloatTensor(y_train).reshape(-1, 1)
+                X_test_tensor = torch.FloatTensor(X_test)
+                y_test_tensor = torch.FloatTensor(y_test_scaled).reshape(-1, 1)
+
+                # Initialize model, loss function and optimizer
+                model = MLP(input_size=X_train.shape[1],
+                            hidden_layers=hidden_layers,
+                            dropout=dropout)
+                criterion = nn.MSELoss()
+                optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
+                                
                 # Train the model
-                if model_name != 'gradient_boosting':
-                    model.fit(X_train, y_train)
-                else:
-                    model.fit(X_train, y_train, X_val=X_test, y_val=y_test)
-        
+                model = mlp_fit(model=model,
+                                X_train=X_train_tensor,
+                                y_train=y_train_tensor,
+                                X_val=X_test_tensor,
+                                y_val=y_test_tensor,
+                                patience=patience,
+                                criterion=criterion,
+                                optimizer=optimizer,
+                                horizon=horizon)
+                
                 # Make predictions
-                forecast = model.predict(X_test).tolist()
+                model.eval()
+                with torch.no_grad():
+                    forecast = model(X_test_tensor).numpy()
+                
+                # Flatten
+                forecast = np.ravel(forecast)
+                
+                # Unscale the predictions
+                forecast = scaler_y.inverse_transform(forecast.reshape(-1, 1)).ravel()
                 
                 # Calculate and save the r2 score
                 r2_scores[horizon-1].append(r2_score(y_test, forecast))
@@ -130,67 +211,6 @@ def hyperparameter_tuning(model_name, horizon_max, aquifers_list, best_features,
 
 # FEATURE SELECTION
 # ----------------------------------------------------------------------------------------------------------------------
-# Time series split class
-class Last365TimeSeriesSplit(BaseCrossValidator):
-    def __init__(self, n_splits, test_size):
-        self.n_splits = n_splits
-        self.test_size = test_size
-
-    def get_n_splits(self, X=None, y=None, groups=None):
-        return self.n_splits
-
-    def split(self, X, y=None, groups=None):
-        n_samples = len(X)
-        indices = np.arange(n_samples)
-        test_start = n_samples - self.test_size
-        train_indices = indices[:test_start]
-        test_indices = indices[test_start:]
-        yield train_indices, test_indices
-
-def ga_feature_selection(model_name, aquifer, test_len, val_len, horizon_max, target_feature, aquifer_by_stations):
-    # Initialize model
-    if model_name == 'linear_regression':
-        model = LinearRegression(n_jobs=-1)
-    elif model_name == 'random_forest':
-        model = RandomForestRegressor(n_jobs=-1, random_state=42)
-    elif model_name == 'gradient_boosting':
-        #model = GradientBoostingRegressor(random_state=42)
-        model = HistGradientBoostingRegressor(random_state=42)
-    else:
-        raise ValueError(f"Model {model_name} not supported for feature selection")
-    
-    # Dictionary to store the best features
-    best_features = {}
-    for horizon in range(1, horizon_max + 1):
-        best_features[f'horizon_{horizon}'] = []
-    
-    for horizon in range(1, horizon_max+1):
-        X_train = aquifer_by_stations[aquifer][:-(test_len + horizon)].drop(columns=['date', 'station_id', 'id', 'location_id'])
-        y_train = aquifer_by_stations[aquifer][target_feature][horizon:-(test_len)]
-    
-        # Initialize genetic algorithm feature selector with max_features set
-        gafs = GAFeatureSelectionCV(
-            estimator=model,
-            cv=Last365TimeSeriesSplit(n_splits=1, test_size=val_len),
-            scoring='r2',
-            population_size=100,
-            generations=25,
-            n_jobs=-1,
-            verbose=True,
-            keep_top_k=5,
-            elitism=True,
-            max_features=40,  # Set the maximum number of features to select
-            mutation_probability=0.2,
-            crossover_probability=0.8
-        )
-    
-        # Fit the feature selector
-        gafs.fit(X_train, y_train)
-        best_features[f'horizon_{horizon}'] = list(gafs.get_feature_names_out(X_train.columns))
-
-    # Return the best features
-    return best_features
-
 def k_best_feature_selection(aquifers_list, test_len, horizon_max, target_feature, aquifer_by_stations, k):
     # Dictionary to store the best features
     best_features = {}
@@ -233,29 +253,8 @@ def final_training(model_name,
                    best_features,
                    best_params):
     # Initialize model
-    if model_name == 'random_forest':
-        model = RandomForestRegressor(n_estimators= best_params['n_estimators'],
-                                 max_depth= best_params['max_depth'],
-                                 max_features= best_params['max_features'],
-                                 min_samples_split= best_params['min_samples_split'],
-                                 min_samples_leaf= best_params['min_samples_leaf'],
-                                 n_jobs=-1,
-                                 random_state=42)
-    elif model_name == 'gradient_boosting':
-        model = HistGradientBoostingRegressor(max_iter= 500,
-                                              max_depth= best_params['max_depth'],
-                                              max_features= best_params['max_features'],
-                                              learning_rate= best_params['learning_rate'],
-                                              min_samples_leaf= best_params['min_samples_leaf'],
-                                              l2_regularization= best_params['l2_regularization'],
-                                              n_iter_no_change= best_params['n_iter_no_change'],
-                                              early_stopping=True,
-                                              random_state=42)
-    elif model_name == 'linear_regression':
-        model = LinearRegression(n_jobs=-1)
-
-    elif model_name == 'ridge_regression':
-        model = Ridge(alpha= best_params['alpha'])
+    if model_name == 'mlp':
+        pass
 
     else:
         raise ValueError(f"Model {model_name} not supported for final training")
@@ -278,35 +277,63 @@ def final_training(model_name,
             else:
                 chosen_features = best_features[f'horizon_{horizon}']
 
-            if model_name != 'gradient_boosting':
-                # Define the train and test set
-                X_train = aquifer_by_stations[aquifer][chosen_features][:-(test_len + horizon)]
-                y_train = aquifer_by_stations[aquifer][target_feature][horizon:-test_len]
-        
-                X_test = aquifer_by_stations[aquifer][chosen_features][-(test_len + horizon):-horizon]
-                y_test = aquifer_by_stations[aquifer][target_feature][-test_len:]
+            # Define the train and test set
+            X_train = aquifer_by_stations[aquifer][chosen_features][:-(val_len + horizon + test_len)]
+            y_train = aquifer_by_stations[aquifer][target_feature][horizon:-(val_len + test_len)]
+            
+            X_val = aquifer_by_stations[aquifer][chosen_features][-(val_len + horizon + test_len):-(horizon + test_len)]
+            y_val = aquifer_by_stations[aquifer][target_feature][-(val_len + test_len):-test_len]
 
-            else:
-                # Define the train and test set
-                X_train = aquifer_by_stations[aquifer][chosen_features][:-(val_len + horizon + test_len)]
-                y_train = aquifer_by_stations[aquifer][target_feature][horizon:-(val_len + test_len)]
-                
-                X_val = aquifer_by_stations[aquifer][chosen_features][-(val_len + horizon + test_len):-(horizon + test_len)]
-                y_val = aquifer_by_stations[aquifer][target_feature][-(val_len + test_len):-test_len]
+            X_test = aquifer_by_stations[aquifer][chosen_features][-(test_len + horizon):-horizon]
+            y_test = aquifer_by_stations[aquifer][target_feature][-test_len:]
 
-                X_test = aquifer_by_stations[aquifer][chosen_features][-(test_len + horizon):-horizon]
-                y_test = aquifer_by_stations[aquifer][target_feature][-test_len:]
-
-    
+            # Define the scaler
+            scaler_X = StandardScaler()
+            scaler_y = StandardScaler()
+            
+            # Scale the features
+            X_train = scaler_X.fit_transform(X_train)
+            X_val = scaler_X.transform(X_val)
+            X_test = scaler_X.transform(X_test)
+            y_train = scaler_y.fit_transform(y_train.values.reshape(-1, 1)).ravel()
+            y_val = scaler_y.transform(y_val.values.reshape(-1, 1)).ravel()
+            
+            # Convert to PyTorch tensors
+            X_train_tensor = torch.FloatTensor(X_train)
+            y_train_tensor = torch.FloatTensor(y_train).reshape(-1, 1)
+            X_val_tensor = torch.FloatTensor(X_val)
+            y_val_tensor = torch.FloatTensor(y_val).reshape(-1, 1)
+            X_test_tensor = torch.FloatTensor(X_test)
+            
+            # Initialize model, loss function and optimizer
+            model = MLP(input_size=X_train.shape[1],
+                        hidden_layers=best_params['hidden_layers'],
+                        dropout=best_params['dropout'])
+            criterion = nn.MSELoss()
+            optimizer = torch.optim.Adam(model.parameters(), lr=best_params['lr'], weight_decay=best_params['weight_decay'])
+            
             # Train the model
-            if model_name != 'gradient_boosting':
-                model.fit(X_train, y_train)
-            else:
-                model.fit(X_train, y_train, X_val=X_val, y_val=y_val)
-    
+            model = mlp_fit(model=model,
+                            X_train=X_train_tensor,
+                            y_train=y_train_tensor,
+                            X_val=X_val_tensor,
+                            y_val=y_val_tensor,
+                            patience=best_params['patience'],
+                            criterion=criterion,
+                            optimizer=optimizer,
+                            horizon=horizon)
+            
             # Make predictions
-            forecast = model.predict(X_test).tolist()
-    
+            model.eval()
+            with torch.no_grad():
+                forecast = model(X_test_tensor).numpy()
+            
+            # Flatten
+            forecast = np.ravel(forecast)
+            
+            # Unscale the predictions
+            forecast = scaler_y.inverse_transform(forecast.reshape(-1, 1)).ravel()
+            
             # Store to the predictions
             predictions.append(forecast)
             
@@ -314,7 +341,7 @@ def final_training(model_name,
             r2_scores[horizon-1].append(r2_score(y_test, forecast))
 
         # Store the predictions to the dictionary
-        predictions_by_stations[aquifer].append(predictions)
+        predictions_by_stations[aquifer] = predictions
 
     # Return the average r2 scores
     r2_average =  []    
@@ -342,7 +369,33 @@ def get_index(folder_path, file_name):
 
     return top_index+1
 
+def convert_ndarray_to_list(obj):
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    elif isinstance(obj, dict):
+        return {k: convert_ndarray_to_list(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_ndarray_to_list(item) for item in obj]
+    else:
+        return obj
+    
+def convert_numpy_to_native(obj):
+    if isinstance(obj, dict):
+        return {k: convert_numpy_to_native(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_numpy_to_native(i) for i in obj]
+    elif isinstance(obj, np.generic):
+        return obj.item()
+    else:
+        return obj
+
 def save_results(model_name, multivariate, r2_scores, predictions, feature_selection, best_features, best_params, file_path, time_string):
+    # Ensure lists
+    predictions = convert_numpy_to_native(convert_ndarray_to_list(predictions))
+    r2_scores = convert_numpy_to_native(convert_ndarray_to_list(r2_scores))
+    best_features = convert_numpy_to_native(convert_ndarray_to_list(best_features))
+    best_params = convert_numpy_to_native(convert_ndarray_to_list(best_params))
+    
     # Create a dictionary to store the results
     results = {
         'model_name': model_name,
@@ -362,11 +415,11 @@ def save_results(model_name, multivariate, r2_scores, predictions, feature_selec
 # EXPERIMENT SETTINGS
 # ----------------------------------------------------------------------------------------------------------------------
 # Load the experiment settings
-with open('experiment_settings/statistical_models_experiment_settings.json', 'r') as file:
+with open(EXPERIMENT_SETTINGS_PATH, 'r') as file:
     experiment_settings = json.load(file)
 
 # Load the data
-aquifer_by_stations = joblib.load('../../data/interim/ground-water-and-weather-with-forecasts-and-additional-features.joblib')
+aquifer_by_stations = joblib.load(DATA_PATH)
 
 # Transform date column to year, month and day columns
 for key in aquifer_by_stations.keys():
@@ -392,20 +445,13 @@ for name, settings in experiment_settings.items():
         # Set the multivariate variable to True
         multivariate = True
 
-        if settings['feature_selection'] == 'ga':
-            # Feature selection
-            best_features = ga_feature_selection(model_name, settings['feature_selection_aquifer'], 
-                                            settings['test_len'], settings['val_len'], 
-                                            settings['horizon_max'], settings['target_feature'], 
-                                            aquifer_by_stations)
-        else:
-            # Feature selection
-            best_features = k_best_feature_selection(aquifers_list=settings['aquifers_list'],
-                                                     test_len=settings['test_len'], 
-                                                     horizon_max=settings['horizon_max'],
-                                                     target_feature=settings['target_feature'], 
-                                                     aquifer_by_stations=aquifer_by_stations,
-                                                     k=settings['k'])
+        # Feature selection
+        best_features = k_best_feature_selection(aquifers_list=settings['aquifers_list'],
+                                                    test_len=settings['test_len'], 
+                                                    horizon_max=settings['horizon_max'],
+                                                    target_feature=settings['target_feature'], 
+                                                    aquifer_by_stations=aquifer_by_stations,
+                                                    k=settings['k'])
     else:
         best_features = {}
         for horizon in range(1, settings['horizon_max'] + 1):
@@ -442,10 +488,10 @@ for name, settings in experiment_settings.items():
     total_time_string = f"{hours}h {minutes}m {seconds}s"
 
     # Obtain the index of the file name (so every experiment has a unique name)
-    index = get_index(folder_path='../results/statistical_models', file_name=name)
+    index = get_index(folder_path=RESULTS_PATH, file_name=name)
 
     # Save the results
-    file_path = f'../results/statistical_models/{name}_{index}.json'
+    file_path = f'{RESULTS_PATH}/{name}_{index}.json'
     save_results(model_name=model_name, 
                  multivariate=multivariate, 
                  r2_scores=r2_scores, 
