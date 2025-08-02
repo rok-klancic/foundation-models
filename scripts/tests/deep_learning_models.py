@@ -28,6 +28,7 @@ import warnings
 warnings.filterwarnings('ignore')
 # Import torch
 import torch
+torch.set_float32_matmul_precision('medium')
 # Import time
 import time
 
@@ -78,8 +79,84 @@ def hyperparameter_tuning(model_name,
                         logger=False)
                         ]
             model = NeuralForecast(models=models, freq='D')
-        
+
         elif model_name == 'n_hits':
+            input_size = trial.suggest_categorical('input_size', [30, 60, 180, 365, 730])
+            stack_types = trial.suggest_categorical('stack_types', [['identity', 'identity'],
+                                                                    ['identity', 'identity', 'identity'], 
+                                                                    ['identity', 'identity', 'identity', 'identity']])
+            
+            # n_blocks
+            if len(stack_types) == 2:
+                n_blocks = trial.suggest_categorical('n_blocks_2', [[1, 1], [2, 2]])
+            elif len(stack_types) == 3:
+                n_blocks = trial.suggest_categorical('n_blocks_3', [[1, 1, 1], [2, 2, 2]])
+            elif len(stack_types) == 4:
+                n_blocks = trial.suggest_categorical('n_blocks_4', [[1, 1, 1, 1], [2, 2, 2, 2]])
+            else:
+                raise ValueError(f"Stack types {stack_types} not supported")
+            
+            # n_freq_downsample
+            if len(stack_types) == 2:
+                n_freq_downsample = trial.suggest_categorical('n_freq_downsample_2', [[2, 1], [3, 1], [4, 1]])
+            elif len(stack_types) == 3:
+                n_freq_downsample = trial.suggest_categorical('n_freq_downsample_3', [[4, 2, 1], [3, 2, 1], [2, 1, 1]])
+            elif len(stack_types) == 4:
+                n_freq_downsample = trial.suggest_categorical('n_freq_downsample_4', [[4, 3, 2, 1], [3, 2, 1, 1], [2, 1, 1, 1]])
+            else:
+                raise ValueError(f"Stack types {stack_types} not supported")
+
+            # mlp_units
+            if len(stack_types) == 2:
+                mlp_units = trial.suggest_categorical('mlp_units_2', [[[256, 256], [256, 256]], [[128, 128], [128, 128]], [[512, 512], [512, 512]], [[1024, 1024], [1024, 1024]]])
+            elif len(stack_types) == 3:
+                mlp_units = trial.suggest_categorical('mlp_units_3', [[[256, 256], [256, 256], [256, 256]], [[128, 128], [128, 128], [128, 128]], [[512, 512], [512, 512], [512, 512]], [[1024, 1024], [1024, 1024], [1024, 1024]]])
+            elif len(stack_types) == 4:
+                mlp_units = trial.suggest_categorical('mlp_units_4', [[[256, 256], [256, 256], [256, 256], [256, 256]], [[128, 128], [128, 128], [128, 128], [128, 128]], [[512, 512], [512, 512], [512, 512], [512, 512]], [[1024, 1024], [1024, 1024], [1024, 1024], [1024, 1024]]])
+            else:
+                raise ValueError(f"Stack types {stack_types} not supported")
+
+            # n_pool_kernel_size
+            if len(stack_types) == 2:
+                n_pool_kernel_size = trial.suggest_categorical('n_pool_kernel_size_2', [[2, 1], [3, 1], [4, 1]])
+            elif len(stack_types) == 3:
+                n_pool_kernel_size = trial.suggest_categorical('n_pool_kernel_size_3', [[4, 2, 1], [3, 2, 1], [2, 1, 1]])
+            elif len(stack_types) == 4:
+                n_pool_kernel_size = trial.suggest_categorical('n_pool_kernel_size_4', [[4, 3, 2, 1], [3, 2, 1, 1], [2, 1, 1, 1]])
+            else:
+                raise ValueError(f"Stack types {stack_types} not supported")
+            
+            dropout_prob_theta = trial.suggest_float('dropout_prob_theta', 0.0, 0.3)
+            learning_rate = trial.suggest_loguniform('learning_rate', 1e-4, 1e-2)
+            max_steps = trial.suggest_categorical('max_steps', [1000])
+            early_stop_patience_steps = trial.suggest_categorical('early_stop_patience_steps', [10])
+            val_check_steps = trial.suggest_categorical('val_check_steps', [50])
+            dropout_prob_theta = trial.suggest_float('dropout_prob_theta', 0.0, 0.3)
+            weight_decay = trial.suggest_categorical('weight_decay', [0.0, 1e-5, 1e-4, 1e-3, 1e-2])
+            activation = trial.suggest_categorical('activation', ['ReLU', 'Softplus', 'Tanh', 'SELU', 'LeakyReLU', 'PReLU', 'Sigmoid'])
+
+            models = [NHITS(h=horizon_max, 
+                            accelerator='cuda',
+                            input_size=input_size,
+                            max_steps=max_steps,
+                            early_stop_patience_steps=early_stop_patience_steps,
+                            val_check_steps=val_check_steps,
+                            learning_rate=learning_rate,
+                            devices=[0],
+                            logger=False,
+                            scaler_type='standard',
+                            dropout_prob_theta=dropout_prob_theta,
+                            stack_types=stack_types,
+                            n_freq_downsample=n_freq_downsample,
+                            mlp_units=mlp_units,
+                            n_pool_kernel_size=n_pool_kernel_size,
+                            n_blocks=n_blocks,
+                            optimizer=torch.optim.Adam,
+                            optimizer_kwargs={'weight_decay': weight_decay},
+                            activation=activation)]
+            model = NeuralForecast(models=models, freq='D')
+        
+        elif model_name == 'n_hits_darts':
             input_chunk_length = trial.suggest_int('input_chunk_length', 5, 70)
             output_chunk_length = trial.suggest_int('output_chunk_length', 1, 10)
             num_stacks = trial.suggest_int('num_stacks', 1, 4)
@@ -284,7 +361,7 @@ def hyperparameter_tuning(model_name,
             # Get the dataset for the aquifer
             y = aquifer_by_stations[aquifer][:-test_len]
     
-            if model_name == 'n_beats':
+            if model_name in ['n_beats', 'n_hits']:
                 # Rename the columns (library wants to have specific names)
                 y = y.rename(columns={'date':'ds', target_feature:'y', 'station_id':'unique_id'})
         
@@ -294,7 +371,7 @@ def hyperparameter_tuning(model_name,
                 # Fit the model
                 model.fit(y[:-val_len], val_size=validation_size)
             
-            elif model_name == 'n_hits':
+            elif model_name == 'n_hits_darts':
                 # Change to TimeSeries format (required by the library)
                 y = TimeSeries.from_dataframe(y, time_col='date', value_cols=target_feature)
                 
@@ -341,10 +418,10 @@ def hyperparameter_tuning(model_name,
             for i in range(val_len + (horizon_max-1), 0, -1):
                 
                 # Predict
-                if model_name == 'n_beats':
+                if model_name in ['n_beats', 'n_hits']:
                     forecast = model.predict(df=y[:-i], verbose=0)
                 
-                elif model_name == 'n_hits':
+                elif model_name == 'n_hits_darts':
                     forecast = model.predict(n=horizon_max, series=y[:-i])
                 
                 elif model_name == 'deepar':
@@ -388,8 +465,12 @@ def hyperparameter_tuning(model_name,
                 if model_name == 'n_beats':
                     for i in range(horizon_max):
                         predictions[i].append(forecast['NBEATS'].values[i])
-                
+
                 elif model_name == 'n_hits':
+                    for i in range(horizon_max):
+                        predictions[i].append(forecast['NHITS'].values[i])
+                
+                elif model_name == 'n_hits_darts':
                     for i in range(horizon_max):
                         predictions[i].append(forecast.values()[i][0])
                 
@@ -412,10 +493,10 @@ def hyperparameter_tuning(model_name,
                         predictions[i] = predictions[i][-val_len:]
                     else:
                         predictions[i] = predictions[i][(horizon_max-i-1):-i]            
-    
+
             # Calculate the r2 scores and store them in a list
             for i in range(horizon_max):
-                if model_name in ['n_beats', 'patchtst', 'n_beats_x', 'n_hits_multivariate']:
+                if model_name in ['n_beats', 'n_hits', 'patchtst', 'n_beats_x', 'n_hits_multivariate']:
                     r2_scores[i].append(r2_score(y['y'][-val_len:], predictions[i]))
                 else:
                     r2_scores[i].append(r2_score(y[target_feature][-val_len:], predictions[i]))
@@ -433,7 +514,7 @@ def hyperparameter_tuning(model_name,
     
     # Run the optuna
     study = optuna.create_study(direction='maximize')
-    study.optimize(objective, n_trials=50)
+    study.optimize(objective, n_trials=30)
 
     # Clean up parameter names by removing trailing numbers
     cleaned_params = {}
@@ -479,6 +560,28 @@ def final_training(model_name,
         model = NeuralForecast(models=models, freq='D')
 
     elif model_name == 'n_hits':
+        models = [NHITS(h=horizon_max, 
+                        accelerator='cuda',
+                        input_size=best_params['input_size'],
+                        max_steps=best_params['max_steps'],
+                        early_stop_patience_steps=best_params['early_stop_patience_steps'],
+                        val_check_steps=best_params['val_check_steps'],
+                        learning_rate=best_params['learning_rate'],
+                        devices=[0],
+                        logger=False,
+                        scaler_type='standard',
+                        dropout_prob_theta=best_params['dropout_prob_theta'],
+                        stack_types=best_params['stack_types'],
+                        n_freq_downsample=best_params['n_freq_downsample'],
+                        mlp_units=best_params['mlp_units'],
+                        n_pool_kernel_size=best_params['n_pool_kernel_size'],
+                        n_blocks=best_params['n_blocks'],
+                        optimizer=torch.optim.Adam,
+                        optimizer_kwargs={'weight_decay': best_params['weight_decay']},
+                        activation=best_params['activation'])]
+        model = NeuralForecast(models=models, freq='D')
+
+    elif model_name == 'n_hits_darts':
         model = NHiTSModel(
             input_chunk_length=best_params['input_chunk_length'],
             output_chunk_length=best_params['output_chunk_length'],
@@ -599,7 +702,7 @@ def final_training(model_name,
         # Get the dataset for the aquifer
         y = aquifer_by_stations[aquifer]
     
-        if model_name == 'n_beats':
+        if model_name in ['n_beats', 'n_hits']:
             # Rename the columns (library wants to have specific names)
             y = y.rename(columns={'date':'ds', target_feature:'y', 'station_id':'unique_id'})
             # Only keep these 3 columns
@@ -608,7 +711,7 @@ def final_training(model_name,
             # Fit the model
             model.fit(y[:-test_len], val_size=validation_size)
 
-        elif model_name == 'n_hits':
+        elif model_name == 'n_hits_darts':
             # Change the format to TimeSeries
             y = TimeSeries.from_dataframe(y, time_col='date', value_cols=target_feature)
             # Fit the model
@@ -650,10 +753,10 @@ def final_training(model_name,
         # Iterate from day_len days before the end, to the last day
         for i in range(test_len + (horizon_max-1), 0, -1):
             # Predict
-            if model_name == 'n_beats':
+            if model_name in ['n_beats', 'n_hits']:
                 forecast = model.predict(df=y[:-i], verbose=0)                 
             
-            elif model_name == 'n_hits':
+            elif model_name == 'n_hits_darts':
                 forecast = model.predict(n=horizon_max, series=y[:-i])
             
             elif model_name == 'deepar':
@@ -696,6 +799,8 @@ def final_training(model_name,
                 if model_name == 'n_beats':
                     predictions[i].append(forecast['NBEATS'].values[i])
                 elif model_name == 'n_hits':
+                    predictions[i].append(forecast['NHITS'].values[i])
+                elif model_name == 'n_hits_darts':
                     predictions[i].append(forecast.values()[i][0])
                 elif model_name == 'deepar':
                     predictions[i].append(forecast[i])
