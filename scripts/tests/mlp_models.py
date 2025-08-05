@@ -5,33 +5,21 @@ import pandas as pd
 import numpy as np
 #import seaborn as sns
 from sklearn.metrics import r2_score
-from sklearn.model_selection import BaseCrossValidator
-from sklearn.base import BaseEstimator
 from sklearn.preprocessing import StandardScaler
-import matplotlib.pyplot as plt
 import optuna
 import json
 # Torch
 import torch
 import torch.nn as nn
-# RandomForest
-from sklearn.ensemble import RandomForestRegressor
-# GradientBoostingRegressor
-from sklearn.ensemble import GradientBoostingRegressor
-from sklearn.ensemble import HistGradientBoostingRegressor
-# GAFeatureSelectionCV
-from sklearn.model_selection import TimeSeriesSplit
-#from sklearn_genetic import GAFeatureSelectionCV
-#from sklearn_genetic.plots import plot_fitness_evolution
-# Decision Tree
-from sklearn.tree import DecisionTreeRegressor
-# Linear Regression
-from sklearn.linear_model import LinearRegression, Ridge
+
 import os
 #SelectKBest
 from sklearn.feature_selection import SelectKBest, f_regression
 # Time
 import time
+# Warnings
+import warnings
+warnings.filterwarnings('ignore')
 
 # CONSTANTS
 # ----------------------------------------------------------------------------------------------------------------------
