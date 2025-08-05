@@ -30,6 +30,34 @@ from sklearn.feature_selection import SelectKBest, f_regression
 # Time
 import time
 
+# HELPER FUNCTIONS
+# ----------------------------------------------------------------------------------------------------------------------
+
+# Remove the weather predictions from a certain horizon onwards
+def remove_weather_predictions(aquifer_by_stations, horizons_to_remove, aquifers_list):
+    for aquifer in aquifers_list:
+        columns_to_remove = []
+        for horizon in horizons_to_remove:
+            starting_sequences = [  f'tn_{horizon}',
+                                    f'tx_{horizon}',
+                                    f'nn_decodeText_{horizon}',
+                                    f'rr_decodeText_{horizon}',
+                                    f'ff_decodeText_{horizon}',
+                                    f'wwsyn_decodeText_{horizon}',
+                                    f'dd_decodeText_{horizon}']
+
+            # Find all columns that start with any of the starting_sequences
+            for col in aquifer_by_stations[aquifer].columns:
+                for seq in starting_sequences:
+                    if col.startswith(seq):
+                        columns_to_remove.append(col)
+                        break  # Avoid duplicate appends if multiple sequences match
+            # Remove the columns
+        aquifer_by_stations[aquifer].drop(columns=columns_to_remove, inplace=True)
+        print(f"Remaining columns: {aquifer_by_stations[aquifer].columns.tolist()[-100:]}")
+    return aquifer_by_stations
+
+    
 
 # HYPERPARAMETER TUNING
 # ----------------------------------------------------------------------------------------------------------------------
@@ -392,6 +420,12 @@ for name, settings in experiment_settings.items():
         # Set the multivariate variable to True
         multivariate = True
 
+        # Check if we need to remove any weather predictions
+        if 'remove_weather_predictions' in settings.keys() and settings['remove_weather_predictions']:
+            aquifer_by_stations = remove_weather_predictions(aquifer_by_stations=aquifer_by_stations, 
+                                                             horizons_to_remove=settings['horizons_to_remove_weather'], 
+                                                             aquifers_list=settings['aquifers_list'])
+
         if settings['feature_selection'] == 'ga':
             # Feature selection
             best_features = ga_feature_selection(model_name, settings['feature_selection_aquifer'], 
@@ -407,9 +441,11 @@ for name, settings in experiment_settings.items():
                                                      aquifer_by_stations=aquifer_by_stations,
                                                      k=settings['k'])
     else:
+        # Find the target feature columns
+        target_feature_columns = find_target_feature_columns(settings['target_feature'], aquifer_by_stations)
         best_features = {}
         for horizon in range(1, settings['horizon_max'] + 1):
-            best_features[f'horizon_{horizon}'] = ['altitude_diff']
+            best_features[f'horizon_{horizon}'] = target_feature_columns
 
     # Hyperparameter tuning
     if settings['hyperparameter_tuning']:

@@ -31,6 +31,32 @@ import optuna
 # SelectKBest
 from sklearn.feature_selection import SelectKBest, f_regression
 
+# HELPER FUNCTIONS
+# ----------------------------------------------------------------------------------------------------------------------
+# Remove the weather predictions from a certain horizon onwards
+def remove_weather_predictions(aquifer_by_stations, horizons_to_remove, aquifers_list):
+    for aquifer in aquifers_list:
+        columns_to_remove = []
+        for horizon in horizons_to_remove:
+            starting_sequences = [  f'tn_{horizon}',
+                                    f'tx_{horizon}',
+                                    f'nn_decodeText_{horizon}',
+                                    f'rr_decodeText_{horizon}',
+                                    f'ff_decodeText_{horizon}',
+                                    f'wwsyn_decodeText_{horizon}',
+                                    f'dd_decodeText_{horizon}']
+
+            # Find all columns that start with any of the starting_sequences
+            for col in aquifer_by_stations[aquifer].columns:
+                for seq in starting_sequences:
+                    if col.startswith(seq):
+                        columns_to_remove.append(col)
+                        break  # Avoid duplicate appends if multiple sequences match
+            # Remove the columns
+        aquifer_by_stations[aquifer].drop(columns=columns_to_remove, inplace=True)
+        print(f"Remaining columns: {aquifer_by_stations[aquifer].columns.tolist()[-100:]}")
+    return aquifer_by_stations
+
 
 # HYPERPARAMETER TUNING
 # ----------------------------------------------------------------------------------------------------------------------

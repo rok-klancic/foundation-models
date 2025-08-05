@@ -1,12 +1,12 @@
 {
-    "timesfm_multivariate": {
-        "model_name": "timesfm_multivariate",
-        "additional_features": true,
+    "timesfm_univariate": {
+        "model_name": "timesfm_univariate",
+        "additional_features": false,
         "hyperparameter_tuning": true,
         "test_len": 365,
         "val_len": 365,
         "horizon_max": 5,
         "target_feature": "altitude_diff",
-        "aquifers_list": [85065]
+        "aquifers_list": [85065, 85064]
     }
 }

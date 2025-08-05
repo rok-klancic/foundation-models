@@ -156,6 +156,12 @@ for name, settings in experiment_settings.items():
         # Load the data
         aquifer_by_stations = joblib.load('../../data/interim/ground-water-and-weather-with-forecasts-and-additional-features.joblib')
         
+        # Check if we need to remove any weather predictions
+        if 'remove_weather_predictions' in settings.keys() and settings['remove_weather_predictions']:
+            aquifer_by_stations = stat_time_moe.remove_weather_predictions(aquifer_by_stations=aquifer_by_stations, 
+                                                                           horizons_to_remove=settings['horizons_to_remove_weather'], 
+                                                                           aquifers_list=settings['aquifers_list'])
+
         # Feature selection
         best_features = stat_time_moe.k_best_feature_selection(aquifers_list=settings['aquifers_list'],
                                                                test_len=settings['test_len'], 
@@ -197,7 +203,10 @@ for name, settings in experiment_settings.items():
                                                                                               aquifer_by_stations=aquifer_by_stations, 
                                                                                               statisctical_predictions=statistical_predictions)
         # Define the name for the results file
-        saving_name = f'{name}_{model_name}'
+        if 'remove_weather_predictions' in settings.keys() and settings['remove_weather_predictions']:
+            saving_name = f'{name}_{model_name}_shorter_weather_predictions'
+        else:
+            saving_name = f'{name}_{model_name}'
 
     elif name == 'statistical + Time-MoE + statistical':
         # Load the data

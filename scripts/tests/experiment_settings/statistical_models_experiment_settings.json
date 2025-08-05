@@ -1,10 +1,12 @@
 {
-    "ridge_regression_univariate": {
+    "ridge_regression_multivariate_shorter_weather_predicitions": {
         "model_name": "ridge_regression",
-        "additional_features": false,
+        "additional_features": true,
         "hyperparameter_tuning": true,
-        "feature_selection": null,
-        "k": null,
+        "feature_selection": "k-best",
+        "k": 80,
+        "remove_weather_predictions": true,
+        "horizons_to_remove_weather": [4, 5],
         "test_len": 365,
         "val_len": 365,
         "horizon_max": 5,
