@@ -5,7 +5,7 @@
         "test_len": 365,
         "val_len": 365,
         "horizon_max": 5,
-        "target_feature": "altitude_diff",
+        "target_feature": "altitude",
         "aquifers_list": [85065, 85064]
     }
 }

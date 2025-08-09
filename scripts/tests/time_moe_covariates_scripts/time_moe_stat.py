@@ -2,7 +2,7 @@ import numpy as np
 from sklearn.metrics import r2_score
 
 # Ridge regression
-from sklearn.linear_model import Ridge
+from sklearn.linear_model import Ridge, LinearRegression
 
 # Random forest
 from sklearn.ensemble import RandomForestRegressor
@@ -19,6 +19,32 @@ import optuna
 
 #SelectKBest
 from sklearn.feature_selection import SelectKBest, f_regression
+
+
+# HELPER FUNCTIONS
+# ----------------------------------------------------------------------------------------------------------------------
+# Remove the weather predictions from a certain horizon onwards
+def remove_weather_predictions(aquifer_by_stations, horizons_to_remove, aquifers_list):
+    for aquifer in aquifers_list:
+        columns_to_remove = []
+        for horizon in horizons_to_remove:
+            starting_sequences = [  f'tn_{horizon}',
+                                    f'tx_{horizon}',
+                                    f'nn_decodeText_{horizon}',
+                                    f'rr_decodeText_{horizon}',
+                                    f'ff_decodeText_{horizon}',
+                                    f'wwsyn_decodeText_{horizon}',
+                                    f'dd_decodeText_{horizon}']
+
+            # Find all columns that start with any of the starting_sequences
+            for col in aquifer_by_stations[aquifer].columns:
+                for seq in starting_sequences:
+                    if col.startswith(seq):
+                        columns_to_remove.append(col)
+                        break  # Avoid duplicate appends if multiple sequences match
+            # Remove the columns
+        aquifer_by_stations[aquifer].drop(columns=columns_to_remove, inplace=True)
+    return aquifer_by_stations
 
 
 # HYPERPARAMETER TUNING
@@ -117,7 +143,7 @@ def hyperparameter_tuning(model_name,
     
     # Run the optuna
     study = optuna.create_study(direction='maximize')
-    study.optimize(objective, n_trials=50)
+    study.optimize(objective, n_trials=30)
 
     # Return the best parameters
     return study.best_params
@@ -186,6 +212,8 @@ def final_training(model_name,
                                               random_state=42)
     elif model_name == 'ridge_regression':
         model = Ridge(alpha= best_params['alpha'])
+    elif model_name == 'linear_regression':
+        model = LinearRegression(n_jobs=-1)
     else:
         raise ValueError(f"Model {model_name} not supported for final training")
 

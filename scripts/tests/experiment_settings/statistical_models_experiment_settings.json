@@ -1,16 +1,14 @@
 {
-    "ridge_regression_multivariate_shorter_weather_predicitions": {
+    "ridge_regression_univariate_altitude": {
         "model_name": "ridge_regression",
-        "additional_features": true,
+        "additional_features": false,
         "hyperparameter_tuning": true,
         "feature_selection": "k-best",
         "k": 80,
-        "remove_weather_predictions": true,
-        "horizons_to_remove_weather": [4, 5],
         "test_len": 365,
         "val_len": 365,
         "horizon_max": 5,
-        "target_feature": "altitude_diff",
+        "target_feature": "altitude",
         "aquifers_list": [85065, 85064]
     }
 }

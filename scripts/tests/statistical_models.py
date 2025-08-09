@@ -32,6 +32,11 @@ import time
 
 # HELPER FUNCTIONS
 # ----------------------------------------------------------------------------------------------------------------------
+# Function that finds the target feature columns
+def find_target_feature_columns(target_feature, aquifer_by_stations):
+    aquifer = list(aquifer_by_stations.keys())[0]
+    target_feature_columns = [col for col in aquifer_by_stations[aquifer].columns if target_feature in col]
+    return target_feature_columns
 
 # Remove the weather predictions from a certain horizon onwards
 def remove_weather_predictions(aquifer_by_stations, horizons_to_remove, aquifers_list):
@@ -54,7 +59,6 @@ def remove_weather_predictions(aquifer_by_stations, horizons_to_remove, aquifers
                         break  # Avoid duplicate appends if multiple sequences match
             # Remove the columns
         aquifer_by_stations[aquifer].drop(columns=columns_to_remove, inplace=True)
-        print(f"Remaining columns: {aquifer_by_stations[aquifer].columns.tolist()[-100:]}")
     return aquifer_by_stations
 
     
