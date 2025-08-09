@@ -29,6 +29,7 @@ import json
 
 # Import functions for time_moe + statistical
 from time_moe_covariates_scripts import time_moe_stat, stat_time_moe, stat_timeMoe_stat, hidden_statistical, hidden_mlp, hidden_deep_learning
+from time_moe_covariates_scripts import last_layer_weather_injection
 
 # Import time
 import time
@@ -424,6 +425,39 @@ for name, settings in experiment_settings.items():
                                                                           best_params=best_params,
                                                                           time_moe_outputs=time_moe_outputs,
                                                                           time_moe_features=time_moe_features)
+        
+        # Define the name for the results file
+        saving_name = f'{name}_{model_name}'
+
+    elif name == 'last_layer_weather_injection':
+        # Load the data
+        aquifer_by_stations = joblib.load('../../data/interim/ground-water-and-weather-with-weather-and-timemoe-forecasts-and-additional-features.joblib')
+        # Get the time moe outputs
+        time_moe_outputs = joblib.load('../../data/interim/time_moe_outputs.joblib')
+
+        # Set the best features to [] for the json saving
+        best_features = []
+
+        # Hyperparameter tuning
+        best_params = last_layer_weather_injection.hyperparameter_tuning(model_name=model_name,
+                                                                         horizon_max=settings['horizon_max'],
+                                                                         aquifers_list=settings['aquifers_list'],
+                                                                         target_feature=settings['target_feature'],
+                                                                         test_len=settings['test_len'],
+                                                                         val_len=settings['val_len'],
+                                                                         aquifer_by_stations=aquifer_by_stations,
+                                                                         time_moe_outputs=time_moe_outputs)
+        
+        # Final training
+        r2_average, r2_scores, predictions = last_layer_weather_injection.final_training(model_name=model_name,
+                                                                                        horizon_max=settings['horizon_max'],
+                                                                                        aquifers_list=settings['aquifers_list'],
+                                                                                        test_len=settings['test_len'],
+                                                                                        val_len=settings['val_len'],
+                                                                                        target_feature=settings['target_feature'],
+                                                                                        aquifer_by_stations=aquifer_by_stations,
+                                                                                        best_params=best_params,
+                                                                                        time_moe_outputs=time_moe_outputs)
         
         # Define the name for the results file
         saving_name = f'{name}_{model_name}'
