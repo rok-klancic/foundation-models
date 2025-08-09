@@ -1,7 +1,7 @@
 {
-    "timesfm_univariate": {
-        "model_name": "timesfm_univariate",
-        "additional_features": false,
+    "timesfm_multivariate": {
+        "model_name": "timesfm_multivariate",
+        "additional_features": true,
         "hyperparameter_tuning": true,
         "test_len": 365,
         "val_len": 365,

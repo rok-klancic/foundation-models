@@ -51,16 +51,15 @@ def define_model(model_name, horizon):
 def hyperparameter_tuning(model_name, horizon_max, aquifers_list, target_feature, val_len, test_len, aquifer_by_stations):
     def objective(trial):
         if model_name == 'timesfm_multivariate':
-            context_len = trial.suggest_categorical('context_len', [7, 30, 90, 180, 365, 512])
+            context_len = trial.suggest_categorical('context_len', [64, 128, 256, 512])
             ridge = trial.suggest_float('ridge', 1e-4, 100.0, log=True)
-            xreg_mode = trial.suggest_categorical('xreg_mode', ['xreg + timesfm']) #, 'timesfm + xreg'])
+            xreg_mode = trial.suggest_categorical('xreg_mode', ['timesfm + xreg', 'xreg + timesfm'])
 
             model = define_model(MODEL_CHECKPOINT, horizon_max) 
 
         
         elif model_name == 'timesfm_univariate':
-            #context_len = trial.suggest_categorical('context_len', [7, 30, 90, 180, 365, 512])
-            context_len = trial.suggest_categorical('context_len', [512])
+            context_len = trial.suggest_categorical('context_len', [7, 30, 90, 180, 365, 512])
             model = define_model(MODEL_CHECKPOINT, horizon_max) 
 
         else:
@@ -100,6 +99,10 @@ def hyperparameter_tuning(model_name, horizon_max, aquifers_list, target_feature
                                 covariates[additional_parameter][0].append(y[f'{additional_parameter}_{j}'].iloc[-(i+1)])
                             else:
                                 covariates[additional_parameter] = [(y[f'{additional_parameter}_{j}'].iloc[-(context_len+i):-i].values.tolist())]
+                    
+                    for key, value in covariates.items():
+                        if len(value[0]) < context_len + horizon_max:
+                            print(f"Covariate {key} has {len(value[0])} values")
 
                     cov_forecast, _ = model.forecast_with_covariates(  
                         inputs=[y_temp], # Wrap in list since inputs expects list of time series
@@ -144,7 +147,7 @@ def hyperparameter_tuning(model_name, horizon_max, aquifers_list, target_feature
     
     # Run the optuna
     study = optuna.create_study(direction='maximize')
-    study.optimize(objective, n_trials=1)
+    study.optimize(objective, n_trials=30)
 
     # Return the best parameters
     return study.best_params
