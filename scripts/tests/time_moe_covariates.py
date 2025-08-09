@@ -117,6 +117,12 @@ for name, settings in experiment_settings.items():
                                       'forecast_altitude_diff_2',
                                       'forecast_altitude_diff_3',
                                       'forecast_altitude_diff_4']
+        
+        # Check if we need to remove any weather predictions
+        if 'remove_weather_predictions' in settings.keys() and settings['remove_weather_predictions']:
+            aquifer_by_stations = time_moe_stat.remove_weather_predictions(aquifer_by_stations=aquifer_by_stations, 
+                                                                           horizons_to_remove=settings['horizons_to_remove_weather'], 
+                                                                           aquifers_list=settings['aquifers_list'])
     
         # Feature selection
         best_features = time_moe_stat.k_best_feature_selection(aquifers_list=settings['aquifers_list'],
@@ -127,15 +133,18 @@ for name, settings in experiment_settings.items():
                                                      k=settings['k'])
         
         # Hyperparameter tuning
-        best_params = time_moe_stat.hyperparameter_tuning(model_name=model_name,
-                                                          horizon_max=settings['horizon_max'], 
-                                                          aquifers_list=settings['aquifers_list'], 
-                                                          best_features=best_features, 
-                                                          target_feature=settings['target_feature'], 
-                                                          test_len=settings['test_len'], 
-                                                          val_len=settings['val_len'], 
-                                                          aquifer_by_stations=aquifer_by_stations,
-                                                          time_moe_forecast_features=time_moe_forecast_features)
+        if model_name not in ['linear_regression']:
+            best_params = time_moe_stat.hyperparameter_tuning(model_name=model_name,
+                                                            horizon_max=settings['horizon_max'], 
+                                                            aquifers_list=settings['aquifers_list'], 
+                                                            best_features=best_features, 
+                                                            target_feature=settings['target_feature'], 
+                                                            test_len=settings['test_len'], 
+                                                            val_len=settings['val_len'], 
+                                                            aquifer_by_stations=aquifer_by_stations,
+                                                            time_moe_forecast_features=time_moe_forecast_features)
+        else:
+            best_params = None
         
         # Final training
         r2_average, r2_scores, predictions = time_moe_stat.final_training(model_name=model_name,
@@ -150,7 +159,10 @@ for name, settings in experiment_settings.items():
                                                                           time_moe_forecast_features=time_moe_forecast_features)
         
         # Define the name for the results file
-        saving_name = f'{name}_{model_name}'
+        if 'remove_weather_predictions' in settings.keys() and settings['remove_weather_predictions']:
+            saving_name = f'{name}_{model_name}_shorter_weather_predictions'
+        else:
+            saving_name = f'{name}_{model_name}'
 
     elif name == 'statistical + time_moe':
         # Load the data
@@ -286,6 +298,12 @@ for name, settings in experiment_settings.items():
         aquifer_by_stations = joblib.load('../../data/interim/ground-water-and-weather-with-forecasts-and-additional-features.joblib')
         time_moe_outputs = joblib.load('../../data/interim/time_moe_outputs.joblib')
 
+        # Check if we need to remove any weather predictions
+        if 'remove_weather_predictions' in settings.keys() and settings['remove_weather_predictions']:
+            aquifer_by_stations = hidden_statistical.remove_weather_predictions(aquifer_by_stations=aquifer_by_stations, 
+                                                                           horizons_to_remove=settings['horizons_to_remove_weather'], 
+                                                                           aquifers_list=settings['aquifers_list'])
+
         # Feature selection
         best_features = hidden_statistical.k_best_feature_selection(aquifers_list=settings['aquifers_list'],
                                                                    test_len=settings['test_len'],
@@ -321,7 +339,10 @@ for name, settings in experiment_settings.items():
                                                                               time_moe_outputs=time_moe_outputs)
         
         # Define the name for the results file
-        saving_name = f'{name}_{model_name}'
+        if 'remove_weather_predictions' in settings.keys() and settings['remove_weather_predictions']:
+            saving_name = f'{name}_{model_name}_shorter_weather_predictions'
+        else:
+            saving_name = f'{name}_{model_name}'
 
     elif name == 'hidden_layer + MLP':
         # Load the data

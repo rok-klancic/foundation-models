@@ -1,13 +1,12 @@
 {
-    "statistical + time_moe": {
-        "model_name": "linear_regression",
+    "hidden_layer + MLP": {
+        "model_name": "mlp",
         "k": 80,
+        "context_length": 720,
         "test_len": 365,
         "val_len": 365,
         "horizon_max": 5,
-        "target_feature": "altitude_diff",
-        "aquifers_list": [85065, 85064],
-        "remove_weather_predictions": true,
-        "horizons_to_remove_weather": [4, 5]
+        "target_feature": "altitude",
+        "aquifers_list": [85065, 85064]
     }
 }
