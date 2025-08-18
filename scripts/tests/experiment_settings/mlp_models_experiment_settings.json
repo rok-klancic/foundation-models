@@ -1,10 +1,9 @@
 {
     "mlp_univariate": {
         "model_name": "mlp",
-        "additional_features": true,
+        "additional_features": false,
         "hyperparameter_tuning": true,
-        "feature_selection": "k_best",
-        "k": 80,
+        "feature_selection": null,
         "test_len": 365,
         "val_len": 365,
         "horizon_max": 5,

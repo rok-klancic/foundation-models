@@ -92,6 +92,12 @@ def mlp_fit(model, X_train, y_train, X_val, y_val, patience, criterion, optimize
     model.load_state_dict(best_model_state)
     return model
 
+# Function that finds the target feature columns
+def find_target_feature_columns(target_feature, aquifer_by_stations):
+    aquifer = list(aquifer_by_stations.keys())[0]
+    target_feature_columns = [col for col in aquifer_by_stations[aquifer].columns if target_feature in col]
+    return target_feature_columns
+
 
 # HYPERPARAMETER TUNING
 # ----------------------------------------------------------------------------------------------------------------------
@@ -441,9 +447,13 @@ for name, settings in experiment_settings.items():
                                                     aquifer_by_stations=aquifer_by_stations,
                                                     k=settings['k'])
     else:
+        # Find the target feature columns
+        target_feature_columns = find_target_feature_columns(settings['target_feature'], aquifer_by_stations)
         best_features = {}
         for horizon in range(1, settings['horizon_max'] + 1):
-            best_features[f'horizon_{horizon}'] = ['altitude_diff']
+            best_features[f'horizon_{horizon}'] = target_feature_columns
+
+
 
     # Hyperparameter tuning
     if settings['hyperparameter_tuning']:
