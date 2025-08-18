@@ -1,14 +1,49 @@
 {
-    "ridge_regression_univariate_altitude": {
+    "ridge_regression_univariate": {
         "model_name": "ridge_regression",
         "additional_features": false,
         "hyperparameter_tuning": true,
-        "feature_selection": "k-best",
-        "k": 80,
+        "feature_selection": null,
         "test_len": 365,
         "val_len": 365,
         "horizon_max": 5,
-        "target_feature": "altitude",
+        "target_feature": "altitude_diff",
+        "aquifers_list": [85065, 85064]
+    },
+
+    "random_forest_univariate": {
+        "model_name": "random_forest",
+        "additional_features": false,
+        "hyperparameter_tuning": true,
+        "feature_selection": null,
+        "test_len": 365,
+        "val_len": 365,
+        "horizon_max": 5,
+        "target_feature": "altitude_diff",
+        "aquifers_list": [85065, 85064]
+    },
+
+    "linear_regression_univariate": {
+        "model_name": "linear_regression",
+        "additional_features": false,
+        "hyperparameter_tuning": false,
+        "feature_selection": null,
+        "test_len": 365,
+        "val_len": 365,
+        "horizon_max": 5,
+        "target_feature": "altitude_diff",
+        "aquifers_list": [85065, 85064]
+    },
+
+    "gradient_boosting_univariate": {
+        "model_name": "gradient_boosting",
+        "additional_features": false,
+        "hyperparameter_tuning": true,
+        "feature_selection": null,
+        "test_len": 365,
+        "val_len": 365,
+        "horizon_max": 5,
+        "target_feature": "altitude_diff",
         "aquifers_list": [85065, 85064]
     }
 }
