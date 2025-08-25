@@ -9,16 +9,17 @@ import matplotlib.pyplot as plt
 SAVE_PATH_FIGURES = '../../reports/all_models/figures'
 RESULTS_PATH = '../../scripts/results'
 SAVE_PATH_TABLES = '../../reports/all_models/tables'
-MODEL_FOLDER_NAMES = ['deep_learning_models', 'time_moe_covariates', 'foundation_models', 'statistical_models', 'time_moe_covariate_models']
+MODEL_FOLDER_NAMES = ['deep_learning_models', 'mlp_models', 'time_moe_covariates', 'foundation_models', 'statistical_models', 'time_moe_covariate_models']
 
 # Dictionary of the models based on their type (folder name)
 MODEL_DICT = {
-    'deep_learning_models': ['deepar', 'n_beats_x', 'n_hits_multivariate', 'n-beats', 'patch-tst'],
-    'foundation_models': ['chronos', 'time_moe'],
+    'deep_learning_models': ['deepar', 'n_beats_x', 'n_hits_multivariate', 'n-beats', 'patch-tst', 'n-hits'],
+    'mlp_models': ['mlp_multivariate', 'mlp_univariate'],
+    'foundation_models': ['chronos', 'time_moe', 'timesfm_multivariate', 'timesfm_univariate'],
     'statistical_models': ['gradient_boosting_multivariate', 'gradient_boosting_univariate', 
                            'linear_regression_multivariate', 'linear_regression_univariate',
                            'random_forest_multivariate', 'random_forest_univariate',
-                           'ridge_regression_multivariate'],
+                           'ridge_regression_multivariate', 'ridge_regression_univariate'],
     'time_moe_covariate_models': ['hidden_layer + MLP_mlp',
                                   'hidden_layer + statistical_gradient_boosting',
                                   'hidden_layer + statistical_random_forest',
@@ -36,7 +37,9 @@ MODEL_DICT = {
                                   'statistical + Time-MoE + statistical_linear_regression',
                                   'time_moe + statistical_gradient_boosting',
                                   'time_moe + statistical_random_forest',
-                                  'time_moe + statistical_ridge_regression']
+                                  'time_moe + statistical_ridge_regression',
+                                  'time_moe + statistical_linear_regression',
+                                  'last_layer_weather_injection_weather_mlp']
 }
 
 # Function that finds the highest index of a file in the folder.   
@@ -65,7 +68,7 @@ def concatenate_index_and_file_name(file_name, index):
 def average_results(results):
     average = []
     for result in results:
-        average.append(np.mean(result))
+        average.append(round(np.mean(result), 3))
     return average
 
 def save_pandas_as_figure(df, path):
