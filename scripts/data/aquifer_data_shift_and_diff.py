@@ -1,14 +1,15 @@
 import joblib
 import pandas as pd
 import os
+import gc
 
 
 # CONSTANTS
 # all of the paths are relative to the root of the project,
 # except for the path that point to the root of the project
 AQUIFER_BY_STATIONS_PATH = 'data/interim/ground-water-and-weather-no-new-features.joblib'
-ROOT_PATH = 'C:/Users/Rok/Desktop/Rok/IJS/foundation-models'
-SAVING_PATH = 'data/interim/ground-water-and-weather-shits-and-diffs-2025-08-25.joblib'
+ROOT_PATH = '../../'
+SAVING_PATH = 'data/interim/ground-water-and-weather-shifts-and-diffs-2025-08-25.joblib'
 DAYS_TO_SHIFT = 10
 MAX_DAYS_AHEAD = 5
 DAYS_TO_AVG = 10
@@ -21,17 +22,36 @@ COLUMNS_TO_SHIFT = ['precipitation', 'snow_accumulation', 'temperature_avg',
 FEATURE_TO_DIFF = 'altitude'
 
 # FUNCTIONS
+#def create_diffs(data, max_days_ahead, feature_name):
+#    for i in range(1, max_days_ahead+1):
+#        data[f'{feature_name}_diff_{i}'] = data[feature_name].diff(i)
+#
+#        # shift the column, so it contains NaN at the end
+#        data[f'{feature_name}_diff_{i}'] = data[f'{feature_name}_diff_{i}'].shift(-i)
+#
+#        # fill the NaN values with the previous value
+#        data[f'{feature_name}_diff_{i}'] = data[f'{feature_name}_diff_{i}'].ffill()
+#
+#    return data
+
 def create_diffs(data, max_days_ahead, feature_name):
+    new_columns = {}
+
     for i in range(1, max_days_ahead+1):
-        data[f'{feature_name}_diff_{i}'] = data[feature_name].diff(i)
-
+        diff = data[feature_name].diff(i)
         # shift the column, so it contains NaN at the end
-        data[f'{feature_name}_diff_{i}'] = data[f'{feature_name}_diff_{i}'].shift(-i)
-
+        diff = diff.shift(-i)
         # fill the NaN values with the previous value
-        data[f'{feature_name}_diff_{i}'] = data[f'{feature_name}_diff_{i}'].ffill()
+        diff = diff.ffill()
 
-    return data
+        new_columns[f'{feature_name}_diff_{i}'] = diff
+
+    new_df = pd.DataFrame(new_columns, index=data.index)
+    new_data = pd.concat([data, new_df], axis=1)
+
+    # Clean up
+    del new_columns, new_df
+    return new_data
 
 #def create_shifts(data, days_to_shift, columns_to_shift):
 #    # Iterate over all of the columns in the columns_to_shift
@@ -58,7 +78,11 @@ def create_shifts(data, days_to_shift, columns_to_shift):
     
     # Add all new columns at once
     new_df = pd.DataFrame(new_columns, index=data.index)
-    return pd.concat([data, new_df], axis=1)
+    result = pd.concat([data, new_df], axis=1)
+
+    # Clean up
+    del new_columns, new_df
+    return result
 
 #def create_avg(data, days_to_avg, columns_to_avg):
 #    for column in columns_to_avg:
@@ -79,7 +103,11 @@ def create_avg(data, days_to_avg, columns_to_avg):
 
     # Add all new columns at once
     new_df = pd.DataFrame(new_columns, index=data.index)
-    return pd.concat([data, new_df], axis=1)
+    result = pd.concat([data, new_df], axis=1)
+    
+    # Clean up
+    del new_columns, new_df
+    return result
 
 
 
@@ -92,24 +120,53 @@ except FileNotFoundError:
     print(f"File not found: {os.path.join(ROOT_PATH, AQUIFER_BY_STATIONS_PATH)}")
     exit(1)
 
-# Create diffs for predicting multiple days ahead
-for key, data in aquifer_by_stations.items():
-    aquifer_by_stations[key] = create_diffs(data, MAX_DAYS_AHEAD, FEATURE_TO_DIFF)
+## Create diffs for predicting multiple days ahead
+#for key, data in aquifer_by_stations.items():
+#    aquifer_by_stations[key] = create_diffs(data, MAX_DAYS_AHEAD, FEATURE_TO_DIFF)
+#
+## Create shifts of the data from 1 to DAYS_TO_SHIFT days ahead
+#for key, data in aquifer_by_stations.items():
+#    aquifer_by_stations[key] = create_shifts(data, DAYS_TO_SHIFT, COLUMNS_TO_SHIFT)
+#
+## Get the features that are to be averaged
+## these are the features that were shifted + their shifts
+#features_to_avg = COLUMNS_TO_SHIFT
+#for feature in COLUMNS_TO_SHIFT:
+#    for shift in range(1, DAYS_TO_SHIFT+1):
+#        features_to_avg.append(f'{feature}_shift{shift}')
+#
+## Average the features
+#for key, data in aquifer_by_stations.items():
+#    aquifer_by_stations[key] = create_avg(data, DAYS_TO_AVG, features_to_avg)
 
-# Create shifts of the data from 1 to DAYS_TO_SHIFT days ahead
-for key, data in aquifer_by_stations.items():
-    aquifer_by_stations[key] = create_shifts(data, DAYS_TO_SHIFT, COLUMNS_TO_SHIFT)
 
-# Get the features that are to be averaged
-# these are the features that were shifted + their shifts
-features_to_avg = COLUMNS_TO_SHIFT
-for feature in COLUMNS_TO_SHIFT:
-    for shift in range(1, DAYS_TO_SHIFT+1):
-        features_to_avg.append(f'{feature}_shift{shift}')
-
-# Average the features
-for key, data in aquifer_by_stations.items():
-    aquifer_by_stations[key] = create_avg(data, DAYS_TO_AVG, features_to_avg)
+# Process each station one at a time and clean up
+for key, data in list(aquifer_by_stations.items()):
+    print(f"Processing station: {key}")
+    
+    # Create diffs for predicting multiple days ahead
+    data = create_diffs(data, MAX_DAYS_AHEAD, FEATURE_TO_DIFF)
+    
+    # Create shifts of the data from 1 to DAYS_TO_SHIFT days ahead
+    data = create_shifts(data, DAYS_TO_SHIFT, COLUMNS_TO_SHIFT)
+    
+    # Get the features that are to be averaged
+    features_to_avg = COLUMNS_TO_SHIFT.copy()
+    for feature in COLUMNS_TO_SHIFT:
+        for shift in range(1, DAYS_TO_SHIFT+1):
+            features_to_avg.append(f'{feature}_shift{shift}')
+    
+    # Average the features
+    data = create_avg(data, DAYS_TO_AVG, features_to_avg)
+    
+    # Update the dictionary with processed data
+    aquifer_by_stations[key] = data
+    
+    # Force garbage collection after each station
+    del data, features_to_avg
+    gc.collect()
+    
+    print(f"Completed station: {key}")
 
 # Save the data
-joblib.dump(aquifer_by_stations, os.path.join(ROOT_PATH, SAVING_PATH))
+joblib.dump(aquifer_by_stations.copy(), os.path.join(ROOT_PATH, SAVING_PATH))
