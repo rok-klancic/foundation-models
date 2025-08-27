@@ -8,10 +8,10 @@ import os
 # CONSTANTS
 # all of the paths are relative to the root of the project,
 # except for the path that point to the root of the project
-AQUIFER_BY_STATIONS_PATH = 'data/interim/ground-water-and-weather-no-new-features.joblib'
-ROOT_PATH = 'C:/Users/Rok/Desktop/Rok/IJS/foundation-models'
+AQUIFER_BY_STATIONS_PATH = 'data/interim/ground-water-and-weather-shifts-and-diffs-2025-08-25.joblib'
+ROOT_PATH = '../../'
 WEATHER_FORECAST_PATH = 'data/interim/weather-forecast-slovenia-5-days.joblib'
-SAVING_PATH = 'data/processed/ground-water-and-weather-with-forecasts.joblib'
+SAVING_PATH = 'data/processed/ground-water-and-weather-with-forecasts-shifts-and-diffs-2025-08-25.joblib'
 
 
 # get aquifer data
@@ -37,4 +37,4 @@ for key, station in aquifer_by_stations.items():
     aquifer_by_stations[key] = pd.merge(station, weather_forecast, on='date', how='left')
 
 # save the data
-joblib.dump(aquifer_by_stations, os.path.join(ROOT_PATH, SAVING_PATH))
+joblib.dump(aquifer_by_stations.copy(), os.path.join(ROOT_PATH, SAVING_PATH))
