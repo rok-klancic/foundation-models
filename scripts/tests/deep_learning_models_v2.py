@@ -32,6 +32,30 @@ torch.set_float32_matmul_precision('medium')
 # Import time
 import time
 
+# CONSTANTS
+# ----------------------------------------------------------------------------------------------------------------------
+PATH_TO_DATA = 'data/interim/ground-water-and-weather-with-forecasts-and-additional-features.joblib'
+PATH_TO_ROOT = '../../'
+
+# HELPER FUNCTIONS
+def add_zero_rows(y, horizon_max):
+    # prepare a dataframe with the same columns as y with length of horizon_max-1, 
+    # and fill the y column with last value, ds with the continous days and unique_id with the same unique_id as y,
+    # and other columns with the last value
+    zero_rows = pd.DataFrame({})
+    for column in y.columns:
+        if column == 'ds':
+            # Get the last date and generate future dates
+            last_date = y[column].iloc[-1]
+            zero_rows[column] = pd.date_range(
+                start=last_date + pd.Timedelta(days=1), 
+                periods=horizon_max-1, 
+                freq='D'
+            ).tolist()
+        else:
+            zero_rows[column] = [y[column].iloc[-1] for _ in range(horizon_max-1)]
+    return pd.concat([y, zero_rows], ignore_index=True)
+
 # HYPERPARAMETER TUNING
 # ----------------------------------------------------------------------------------------------------------------------
 def hyperparameter_tuning(model_name,
@@ -158,7 +182,7 @@ def hyperparameter_tuning(model_name,
         
 
         elif model_name == 'patchtst':
-            input_size = trial.suggest_int('input_size', 5, 100)
+            input_size = trial.suggest_int('input_size', 5, 730)
             encoder_layers = trial.suggest_categorical('encoder_layers', [2, 4, 6, 8])
             n_heads = trial.suggest_categorical('n_heads', [8, 16, 32])
             hidden_size = trial.suggest_categorical('hidden_size', [64, 128, 256])
@@ -322,28 +346,42 @@ def hyperparameter_tuning(model_name,
     
             # Get the dataset for the aquifer
             y = aquifer_by_stations[aquifer][:-test_len]
+
+            true_diffs = y['altitude_diff'][-val_len:].values
     
             if model_name in ['n_beats', 'n_hits', 'patchtst']:
+                # check if the altitude column exists
+                if target_feature in y.columns:
+                    print(f'{target_feature} column exists')
+                else:
+                    raise ValueError(f"Target feature {target_feature} not found in the dataset")
+
                 # Rename the columns (library wants to have specific names)
                 y = y.rename(columns={'date':'ds', target_feature:'y', 'station_id':'unique_id'})
         
                 # Only keep these 3 columns
                 y = y[['ds', 'y', 'unique_id']]
+
+                # Add 0 rows to the end of the dataframe, so that the model can predict all of the test dates with all of the horizons
+                y = add_zero_rows(y, horizon_max)
+
         
                 # Fit and predict
                 forecasts = model.cross_validation(
-                    df=y[:-(test_len + horizon_max)],
-                    h=horizon_max,
+                    df=y,
                     val_size = validation_size,
-                    test_size = validation_size,
+                    test_size = val_len+(2*(horizon_max-1)),
                     step_size = 1,
                     n_windows = None
                 )
+                
+                # Delete the added rows
+                y = y.iloc[:-(horizon_max-1)]
 
                 # Extract the forecasts for every prediction horizon
 
                 # Sort the values by cutoff date
-                forecasts = forecasts.sort_values(by='cutoff')
+                forecasts = forecasts.sort_values(by=['cutoff', 'ds'])
 
                 # Define the column name
                 match model_name:
@@ -355,12 +393,63 @@ def hyperparameter_tuning(model_name,
                         column_name = 'PatchTST'
                     case _:
                         raise ValueError(f"Unsupported model name: {model_name}")
+
+                if target_feature == 'altitude_diff':
+                    # Group the predicions by horizon
+                    for horizon in range(horizon_max):
+                        # Get the predictions that are horizon steps ahead from each cutoff date
+                        horizon_predictions = forecasts.groupby('cutoff').nth(horizon)[column_name].values
+                        predictions[horizon] = horizon_predictions   
+
+                    # Clean up the results
+                    for i in range(horizon_max):
+                        if i == 0:
+                            predictions[i] = predictions[i][-val_len:]
+                        else:
+                            predictions[i] = predictions[i][(horizon_max-i-1):-i]   
+
+                    # Calculate the r2 scores and store them in a list
+                    for i in range(horizon_max):
+                        r2_scores[i].append(r2_score(y['y'][-val_len:], predictions[i]))
+
+                elif target_feature == 'altitude':
+                    # Get predictions organized by cutoff and horizon
+                    altitude_predictions = []
+                    for horizon in range(horizon_max):
+                        horizon_preds = forecasts.groupby('cutoff').nth(horizon)[column_name].values
+                        altitude_predictions.append(horizon_preds)
                     
-                # Group the predicions by horizon
-                for horizon in range(horizon_max):
-                    # Get the predictions that are horizon steps ahead from each cutoff date
-                    horizon_predictions = forecasts.groupby('cutoff').nth(horizon)[column_name].values
-                    predictions[horizon] = horizon_predictions
+                    # Convert to numpy array: shape (horizon_max, num_cutoffs)
+                    altitude_matrix = np.array(altitude_predictions)
+                    
+                    # Get true values at cutoff dates
+                    cutoff_dates = forecasts['cutoff'].unique()
+                    true_values = y[y['ds'].isin(cutoff_dates)]['y'].values
+                    
+                    # Vectorized diff calculation
+                    # Create sequences: [true_value, pred_h0, pred_h1, pred_h2, ...]
+                    sequences = np.vstack([true_values, altitude_matrix]).T  # Shape: (num_cutoffs, horizon_max+1)
+                    altitude_diffs = np.diff(sequences, axis=1)  # Shape: (num_cutoffs, horizon_max)
+                    
+                    # Convert to list format by horizon
+                    predictions = [altitude_diffs[:, i].tolist() for i in range(horizon_max)]
+                    
+                    # Clean up the results
+                    for i in range(horizon_max):
+                        if i == 0:
+                            predictions[i] = predictions[i][-val_len:]
+                        else:
+                            predictions[i] = predictions[i][(horizon_max-i-1):-i]  
+
+                    # Calculate the r2 scores and store them in a list
+                    for i in range(horizon_max):
+                        r2_scores[i].append(r2_score(true_diffs, predictions[i]))
+
+                else:
+                    raise ValueError(f"Target feature {target_feature} not supported")
+
+
+
 
             #elif model_name in ['n_beats_x', 'n_hits_multivariate']:
             #    # Rename the columns (library wants to have specific names)
@@ -375,85 +464,6 @@ def hyperparameter_tuning(model_name,
             else:
                 raise ValueError(f"Model {model_name} not supported for hyperparameter tuning")
             
-
-            # Extract the forecasts for every prediction horizon
-
-            
-            # Iterate from day_len days before the end, to the last day
-            for i in range(val_len + (horizon_max-1), 0, -1):
-                
-                # Predict
-                if model_name in ['n_beats', 'n_hits']:
-                    forecast = model.predict(df=y[:-i], verbose=0)
-                
-                
-                elif model_name == 'patchtst':
-                    forecast = model.predict(df=y[:-i])
-
-                elif model_name == 'n_beats_x':
-                    for j in range(horizon_max):
-                        y_fit = y[['ds', 'y', 'unique_id']+additional_parameters_list[j]+hist_exog_list]
-                        if (i-(j+1)) >= 0 and (i-(j+1)) < val_len:
-                            futr_df_index = -(i-(j+1)) if i-(j+1) > 0 else None
-                            # Predict
-                            forecast = models_list[j].predict(df=y_fit[:-i], futr_df=y[additional_parameters_list[j] + ['ds', 'unique_id']][-i:futr_df_index], verbose=0)
-                            # Store the results for every prediction horizon separately
-                            predictions[j].append(forecast['NBEATSx'].values[j])
-
-                elif model_name == 'n_hits_multivariate':
-                    for j in range(horizon_max):
-                        y_fit = y[['ds', 'y', 'unique_id']+additional_parameters_list[j]+hist_exog_list]
-                        if (i-(j+1)) >= 0 and (i-(j+1)) < val_len:
-                            futr_df_index = -(i-(j+1)) if i-(j+1) > 0 else None
-                            # Predict
-                            forecast = models_list[j].predict(df=y_fit[:-i], futr_df=y[additional_parameters_list[j] + ['ds', 'unique_id']][-i:futr_df_index], verbose=0)
-                            # Store the results for every prediction horizon separately
-                            predictions[j].append(forecast['NHITS'].values[j])
-               
-                else:
-                    raise ValueError(f"Model {model_name} not supported for hyperparameter tuning")
-    
-                
-                # Store the results for every prediction horizon separately
-                if model_name == 'n_beats':
-                    for i in range(horizon_max):
-                        predictions[i].append(forecast['NBEATS'].values[i])
-
-                elif model_name == 'n_hits':
-                    for i in range(horizon_max):
-                        predictions[i].append(forecast['NHITS'].values[i])
-                
-                elif model_name == 'n_hits_darts':
-                    for i in range(horizon_max):
-                        predictions[i].append(forecast.values()[i][0])
-                
-                elif model_name == 'deepar':
-                    for i in range(horizon_max):
-                        predictions[i].append(forecast[i])
-                
-                elif model_name == 'patchtst':
-                    for i in range(horizon_max):
-                        predictions[i].append(forecast['PatchTST'].values[i])
-
-                elif model_name in ['n_beats_x', 'n_hits_multivariate']:
-                    pass
-                else:
-                    raise ValueError(f"Model {model_name} not supported for hyperparameter tuning")
-            if model_name not in ['n_hits_multivariate', 'n_beats_x']:
-                # Clean up the results
-                for i in range(horizon_max):
-                    if i == 0:
-                        predictions[i] = predictions[i][-val_len:]
-                    else:
-                        predictions[i] = predictions[i][(horizon_max-i-1):-i]            
-
-            # Calculate the r2 scores and store them in a list
-            for i in range(horizon_max):
-                if model_name in ['n_beats', 'n_hits', 'patchtst', 'n_beats_x', 'n_hits_multivariate']:
-                    r2_scores[i].append(r2_score(y['y'][-val_len:], predictions[i]))
-                else:
-                    r2_scores[i].append(r2_score(y[target_feature][-val_len:], predictions[i]))
-        
         # Calculate the average r2 score
         r2_average =  []
         
@@ -467,7 +477,7 @@ def hyperparameter_tuning(model_name,
     
     # Run the optuna
     study = optuna.create_study(direction='maximize')
-    study.optimize(objective, n_trials=30)
+    study.optimize(objective, n_trials=50)
 
     # Clean up parameter names by removing trailing numbers
     cleaned_params = {}
@@ -533,31 +543,6 @@ def final_training(model_name,
                         optimizer_kwargs={'weight_decay': best_params['weight_decay']},
                         activation=best_params['activation'])]
         model = NeuralForecast(models=models, freq='D')
-
-    elif model_name == 'n_hits_darts':
-        model = NHiTSModel(
-            input_chunk_length=best_params['input_chunk_length'],
-            output_chunk_length=best_params['output_chunk_length'],
-            num_blocks=best_params['num_blocks'],
-            num_stacks=best_params['num_stacks'],
-            num_layers=best_params['num_layers'],
-            layer_widths=best_params['layer_widths'],
-            dropout=best_params['dropout'],
-            n_epochs=best_params['n_epochs'],
-            optimizer_kwargs={'lr': best_params['learning_rate']},
-            pl_trainer_kwargs={'logger': False, "accelerator": "gpu", "devices": [0]}
-        )
-    
-    elif model_name == 'deepar':
-        model = DeepAREstimator(prediction_length=horizon_max,
-                         freq='D',
-                         trainer_kwargs={'accelerator': 'gpu', 'max_epochs': 42, 'logger': False},
-                         num_layers=best_params['num_layers'],
-                         hidden_size=best_params['hidden_size'],
-                         context_length=best_params['context_length'],
-                         lr=best_params['lr'],
-                         weight_decay=best_params['weight_decay'],
-                         dropout_rate=best_params['dropout_rate'])
     
     elif model_name == 'patchtst':
         model = PatchTST(h=horizon_max,
@@ -578,66 +563,66 @@ def final_training(model_name,
                          scaler_type='standard',
                          logger=False)
         
-        nf = NeuralForecast(
+        model = NeuralForecast(
             models=[model],
             freq='D'
         )
     
-    elif model_name == 'n_beats_x':
-        # Initialize the models
-        models_list = []
-        
-        # Fill the models list with the models
-        for i in range(horizon_max):
-            stack_types = ['identity', 'exogenous'] if (i+1) == 1 else ['seasonality', 'trend', 'identity', 'exogenous']
-            n_blocks = [1 for _ in range(len(stack_types))]
-            models = [NBEATSx(h=i+1, 
-                            accelerator='cuda',
-                            input_size=best_params['input_size'],
-                            stack_types=stack_types,
-                            n_harmonics=best_params['n_harmonics'],
-                            n_polynomials=best_params['n_polynomials'],
-                            learning_rate=best_params['learning_rate'],
-                            max_steps=best_params['max_steps'],
-                            hist_exog_list=hist_exog_list,
-                            futr_exog_list=additional_parameters_list[i],
-                            devices=[0],
-                            logger=False,
-                            scaler_type='standard',
-                            dropout_prob_theta=best_params['dropout_prob_theta'],
-                            n_blocks=n_blocks,
-                            optimizer=torch.optim.Adam,
-                            optimizer_kwargs={'weight_decay': best_params['weight_decay']})]
-            model = NeuralForecast(models=models, freq='D')
-            models_list.append(model)
-    
-    elif model_name == 'n_hits_multivariate':        
-        # Initialize the models
-        models_list = []
-
-        # Fill the models list with the models
-        for i in range(horizon_max):
-            models = [NHITS(h=i+1, 
-                            accelerator='cuda',
-                            input_size=best_params['input_size'],
-                            max_steps=best_params['max_steps'],
-                            learning_rate=best_params['learning_rate'],
-                            hist_exog_list=hist_exog_list,
-                            futr_exog_list=additional_parameters_list[i],
-                            devices=[0],
-                            logger=False,
-                            scaler_type='standard',
-                            dropout_prob_theta=best_params['dropout_prob_theta'],
-                            stack_types=best_params['stack_types'],
-                            n_freq_downsample=best_params['n_freq_downsample'],
-                            mlp_units=best_params['mlp_units'],
-                            n_pool_kernel_size=best_params['n_pool_kernel_size'],
-                            n_blocks=best_params['n_blocks'],
-                            optimizer=torch.optim.Adam,
-                            optimizer_kwargs={'weight_decay': best_params['weight_decay']},
-                            activation=best_params['activation'])]
-            model = NeuralForecast(models=models, freq='D')
-            models_list.append(model)
+    #elif model_name == 'n_beats_x':
+    #    # Initialize the models
+    #    models_list = []
+    #    
+    #    # Fill the models list with the models
+    #    for i in range(horizon_max):
+    #        stack_types = ['identity', 'exogenous'] if (i+1) == 1 else ['seasonality', 'trend', 'identity', 'exogenous']
+    #        n_blocks = [1 for _ in range(len(stack_types))]
+    #        models = [NBEATSx(h=i+1, 
+    #                        accelerator='cuda',
+    #                        input_size=best_params['input_size'],
+    #                        stack_types=stack_types,
+    #                        n_harmonics=best_params['n_harmonics'],
+    #                        n_polynomials=best_params['n_polynomials'],
+    #                        learning_rate=best_params['learning_rate'],
+    #                        max_steps=best_params['max_steps'],
+    #                        hist_exog_list=hist_exog_list,
+    #                        futr_exog_list=additional_parameters_list[i],
+    #                        devices=[0],
+    #                        logger=False,
+    #                        scaler_type='standard',
+    #                        dropout_prob_theta=best_params['dropout_prob_theta'],
+    #                        n_blocks=n_blocks,
+    #                        optimizer=torch.optim.Adam,
+    #                        optimizer_kwargs={'weight_decay': best_params['weight_decay']})]
+    #        model = NeuralForecast(models=models, freq='D')
+    #        models_list.append(model)
+    #
+    #elif model_name == 'n_hits_multivariate':        
+    #    # Initialize the models
+    #    models_list = []
+#
+    #    # Fill the models list with the models
+    #    for i in range(horizon_max):
+    #        models = [NHITS(h=i+1, 
+    #                        accelerator='cuda',
+    #                        input_size=best_params['input_size'],
+    #                        max_steps=best_params['max_steps'],
+    #                        learning_rate=best_params['learning_rate'],
+    #                        hist_exog_list=hist_exog_list,
+    #                        futr_exog_list=additional_parameters_list[i],
+    #                        devices=[0],
+    #                        logger=False,
+    #                        scaler_type='standard',
+    #                        dropout_prob_theta=best_params['dropout_prob_theta'],
+    #                        stack_types=best_params['stack_types'],
+    #                        n_freq_downsample=best_params['n_freq_downsample'],
+    #                        mlp_units=best_params['mlp_units'],
+    #                        n_pool_kernel_size=best_params['n_pool_kernel_size'],
+    #                        n_blocks=best_params['n_blocks'],
+    #                        optimizer=torch.optim.Adam,
+    #                        optimizer_kwargs={'weight_decay': best_params['weight_decay']},
+    #                        activation=best_params['activation'])]
+    #        model = NeuralForecast(models=models, freq='D')
+    #        models_list.append(model)
 
     else:
         raise ValueError(f"Model {model_name} not supported for final training")
@@ -654,131 +639,122 @@ def final_training(model_name,
     
         # Get the dataset for the aquifer
         y = aquifer_by_stations[aquifer]
+
+        true_diffs = y['altitude_diff'][-test_len:].values
     
-        if model_name in ['n_beats', 'n_hits']:
+        if model_name in ['n_beats', 'n_hits', 'patchtst']:
             # Rename the columns (library wants to have specific names)
             y = y.rename(columns={'date':'ds', target_feature:'y', 'station_id':'unique_id'})
             # Only keep these 3 columns
             y = y[['ds', 'y', 'unique_id']]
+
+            # Add 0 rows to the end of the dataframe, so that the model can predict all of the test dates with all of the horizons
+            y = add_zero_rows(y, horizon_max)
     
-            # Fit the model
-            model.fit(y[:-test_len], val_size=validation_size)
+            # Fit and predict
+            forecasts = model.cross_validation(
+                df=y,
+                val_size = validation_size,
+                test_size = test_len+(2*(horizon_max-1)),
+                step_size = 1,
+                n_windows = None
+            )
 
-        elif model_name == 'n_hits_darts':
-            # Change the format to TimeSeries
-            y = TimeSeries.from_dataframe(y, time_col='date', value_cols=target_feature)
-            # Fit the model
-            model.fit(y[:-test_len])
+            # Delete the added rows
+            y = y.iloc[:-(horizon_max-1)]
 
-        elif model_name == 'deepar':
-            # Scale the data
-            scaler = StandardScaler()
-            y_temp = y[:-test_len]
-            y_temp[target_feature] = scaler.fit_transform(y_temp[[target_feature]])
-            
-            # Change to TimeSeries format (required by the library)
-            y_temp = PandasDataset.from_long_dataframe(y_temp, target=target_feature, item_id='station_id', 
-                                                            timestamp='date', freq='D')
-            # Fit the model
-            predictor = model.train(y_temp)
+            # Extract the forecasts for every prediction horizon
 
-        elif model_name == 'patchtst':
-            # Rename the columns (library wants to have specific names)
-            y = y.rename(columns={'date':'ds', target_feature:'y', 'station_id':'unique_id'})
-            # Only keep these 3 columns
-            y = y[['ds', 'y', 'unique_id']]
-            y_train = y[:-test_len]
-            nf.fit(y_train, val_size=validation_size)
+            # Sort the values by cutoff date
+            forecasts = forecasts.sort_values(by=['cutoff', 'ds'])
 
-        elif model_name in ['n_beats_x', 'n_hits_multivariate']:
-            # Rename the columns (library wants to have specific names)
-            y = y.rename(columns={'date':'ds', 'altitude_diff':'y', 'station_id':'unique_id'})
-            
-            # Fit the models
-            for i in range(horizon_max):
-                # Only keep the relevant columns
-                y_fit = y[['ds', 'y', 'unique_id']+additional_parameters_list[i]+hist_exog_list]
-                models_list[i].fit(y_fit[:-test_len], val_size=0)
+            # Define the column name
+            match model_name:
+                case 'n_beats':
+                    column_name = 'NBEATS'
+                case 'n_hits':
+                    column_name = 'NHITS'
+                case 'patchtst':
+                    column_name = 'PatchTST'
+                case _:
+                    raise ValueError(f"Unsupported model name: {model_name}")
+
+            if target_feature == 'altitude_diff':
+                # Group the predicions by horizon
+                for horizon in range(horizon_max):
+                    # Get the predictions that are horizon steps ahead from each cutoff date
+                    horizon_predictions = forecasts.groupby('cutoff').nth(horizon)[column_name].values
+                    predictions[horizon] = horizon_predictions
+
+                # Shorten the predictions to the test length
+                # If the target feature is altitude, convert the predictions to the altitude_diff
+
+                for i in range(horizon_max):
+                    if i == 0:
+                        predictions[i] = predictions[i][-test_len:]
+                    else:
+                        predictions[i] = predictions[i][(horizon_max-i-1):-i]   
+
+                # Calculate the r2 scores and store them in a list
+                for i in range(horizon_max):
+                    r2_scores[i].append(r2_score(y['y'][-test_len:], predictions[i]))
+
+                # Store the predictions to the dictionary
+                predictions_by_stations[aquifer] = predictions
+
+            elif target_feature == 'altitude':
+                # Get predictions organized by cutoff and horizon
+                altitude_predictions = []
+                for horizon in range(horizon_max):
+                    horizon_preds = forecasts.groupby('cutoff').nth(horizon)[column_name].values
+                    altitude_predictions.append(horizon_preds)
+                
+                # Convert to numpy array: shape (horizon_max, num_cutoffs)
+                altitude_matrix = np.array(altitude_predictions)
+                
+                # Get true values at cutoff dates
+                cutoff_dates = forecasts['cutoff'].unique()
+                true_values = y[y['ds'].isin(cutoff_dates)]['y'].values
+                
+                # Vectorized diff calculation
+                # Create sequences: [true_value, pred_h0, pred_h1, pred_h2, ...]
+                sequences = np.vstack([true_values, altitude_matrix]).T  # Shape: (num_cutoffs, horizon_max+1)
+                altitude_diffs = np.diff(sequences, axis=1)  # Shape: (num_cutoffs, horizon_max)
+                
+                # Convert to list format by horizon
+                predictions = [altitude_diffs[:, i].tolist() for i in range(horizon_max)]
+                
+                # Clean up the results
+                for i in range(horizon_max):
+                    if i == 0:
+                        predictions[i] = predictions[i][-test_len:]
+                    else:
+                        predictions[i] = predictions[i][(horizon_max-i-1):-i]  
+
+                # Calculate the r2 scores and store them in a list
+                for i in range(horizon_max):
+                    r2_scores[i].append(r2_score(true_diffs, predictions[i]))
+
+                # Store the predictions to the dictionary 
+                predictions_by_stations[aquifer] = predictions
+
+            else:
+                raise ValueError(f"Target feature {target_feature} not supported")
+
+
+        #elif model_name in ['n_beats_x', 'n_hits_multivariate']:
+        #    # Rename the columns (library wants to have specific names)
+        #    y = y.rename(columns={'date':'ds', 'altitude_diff':'y', 'station_id':'unique_id'})
+        #    
+        #    # Fit the models
+        #    for i in range(horizon_max):
+        #        # Only keep the relevant columns
+        #        y_fit = y[['ds', 'y', 'unique_id']+additional_parameters_list[i]+hist_exog_list]
+        #        models_list[i].fit(y_fit[:-test_len], val_size=0)
 
         else:
             raise ValueError(f"Model {model_name} not supported for final training")
         
-        # Iterate from day_len days before the end, to the last day
-        for i in range(test_len + (horizon_max-1), 0, -1):
-            # Predict
-            if model_name in ['n_beats', 'n_hits']:
-                forecast = model.predict(df=y[:-i], verbose=0)                 
-            
-            elif model_name == 'n_hits_darts':
-                forecast = model.predict(n=horizon_max, series=y[:-i])
-            
-            elif model_name == 'deepar':
-                #scaler = StandardScaler()
-                y_temp = y[:-i]
-                y_temp[target_feature] = scaler.transform(y_temp[[target_feature]])
-                y_temp = PandasDataset.from_long_dataframe(y_temp, target=target_feature, item_id='station_id', 
-                                                                timestamp='date', freq='D')
-                forecast = list(predictor.predict(y_temp))
-                forecast = scaler.inverse_transform([forecast[0].samples.mean(axis=0)])[0]
-            
-            elif model_name == 'patchtst':
-                forecast = nf.predict(df=y[:-i])
-
-            elif model_name == 'n_beats_x':
-                for j in range(horizon_max):
-                    y_fit = y[['ds', 'y', 'unique_id']+additional_parameters_list[j]+hist_exog_list]
-                    if (i-(j+1)) >= 0 and (i-(j+1)) < test_len:
-                        futr_df_index = -(i-(j+1)) if i-(j+1) > 0 else None
-                        # Predict
-                        forecast = models_list[j].predict(df=y_fit[:-i], futr_df=y[additional_parameters_list[j] + ['ds', 'unique_id']][-i:futr_df_index], verbose=0)
-                        # Store the results for every prediction horizon separately
-                        predictions[j].append(forecast['NBEATSx'].values[j])
-
-            elif model_name == 'n_hits_multivariate':
-                for j in range(horizon_max):
-                    y_fit = y[['ds', 'y', 'unique_id']+additional_parameters_list[j]+hist_exog_list]
-                    if (i-(j+1)) >= 0 and (i-(j+1)) < test_len:
-                        futr_df_index = -(i-(j+1)) if i-(j+1) > 0 else None
-                        # Predict
-                        forecast = models_list[j].predict(df=y_fit[:-i], futr_df=y[additional_parameters_list[j] + ['ds', 'unique_id']][-i:futr_df_index], verbose=0)
-                        # Store the results for every prediction horizon separately
-                        predictions[j].append(forecast['NHITS'].values[j])
-            
-            else:
-                raise ValueError(f"Model {model_name} not supported for final training")
-    
-            # Store the results for every prediction horizon separately
-            for i in range(horizon_max):
-                if model_name == 'n_beats':
-                    predictions[i].append(forecast['NBEATS'].values[i])
-                elif model_name == 'n_hits':
-                    predictions[i].append(forecast['NHITS'].values[i])
-                elif model_name == 'n_hits_darts':
-                    predictions[i].append(forecast.values()[i][0])
-                elif model_name == 'deepar':
-                    predictions[i].append(forecast[i])
-                elif model_name == 'patchtst':
-                    predictions[i].append(forecast['PatchTST'].values[i])
-                elif model_name in ['n_beats_x', 'n_hits_multivariate']:
-                    pass
-                else:
-                    raise ValueError(f"Model {model_name} not supported for final training")
-        
-        # Clean up the results
-        if model_name not in ['n_hits_multivariate', 'n_beats_x']:
-            for i in range(horizon_max):
-                if i == 0:
-                    predictions[i] = predictions[i][-test_len:]
-                else:
-                    predictions[i] = predictions[i][(horizon_max-i-1):-i]
-    
-        # Store the predictions to the dictionary
-        predictions_by_stations[aquifer] = predictions
-    
-        # Calculate the r2 scores and store them in a list
-        for i in range(horizon_max):
-            r2_scores[i].append(r2_score(aquifer_by_stations[aquifer][target_feature][-test_len:], predictions[i]))
-
     # Return the average r2 scores
     r2_average =  []    
     for i in range(horizon_max):
@@ -865,7 +841,7 @@ with open('experiment_settings/deep_learning_models_experiment_settings.json', '
     experiment_settings = json.load(file)
 
 # Load the data
-aquifer_by_stations = joblib.load('../../data/interim/ground-water-and-weather-with-forecasts-and-additional-features.joblib')
+aquifer_by_stations = joblib.load(os.path.join(PATH_TO_ROOT, PATH_TO_DATA))
 
 # TESTING THE MODELS
 # ----------------------------------------------------------------------------------------------------------------------
@@ -880,7 +856,7 @@ for name, settings in experiment_settings.items():
     # If the model is univariate, remove additional features
     if not multivariate:
         for aquifer in aquifer_by_stations.keys():
-            aquifer_by_stations[aquifer] = aquifer_by_stations[aquifer][['altitude_diff', 'date', 'station_id']]
+            aquifer_by_stations[aquifer] = aquifer_by_stations[aquifer][['altitude', 'altitude_diff', 'date', 'station_id']]
 
     # List of additional parameters
     if multivariate:

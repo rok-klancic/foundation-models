@@ -59,7 +59,8 @@ def remove_weather_predictions(aquifer_by_stations, horizons_to_remove, aquifers
                         break  # Avoid duplicate appends if multiple sequences match
             # Remove the columns
         aquifer_by_stations[aquifer].drop(columns=columns_to_remove, inplace=True)
-    return aquifer_by_stations
+    return aquif
+er_by_stations
 
     
 

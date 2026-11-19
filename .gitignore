@@ -204,3 +204,11 @@ scripts/tests/checkpoints/
 /neural_networks_py3.10_venv/
 /.python-version
 /data/processed/
+
+
+# Venvs
+/neural_networks_venv/
+
+# results
+scripts/results/*
+

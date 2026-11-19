@@ -403,7 +403,7 @@ def hyperparameter_tuning(model_name,
 
             elif model_name in ['n_beats_x', 'n_hits_multivariate']:
                 # Rename the columns (library wants to have specific names)
-                y = y.rename(columns={'date':'ds', 'altitude_diff':'y', 'station_id':'unique_id'})
+                y = y.rename(columns={'date':'ds', target_feature:'y', 'station_id':'unique_id'})
 
                 # Fit the models
                 for i in range(horizon_max):
@@ -428,8 +428,8 @@ def hyperparameter_tuning(model_name,
                     # Scale the data
                     #scaler = StandardScaler()
                     y_temp = y[:-i]
-                    y_temp['altitude_diff'] = scaler.transform(y_temp[['altitude_diff']])
-                    y_temp = PandasDataset.from_long_dataframe(y_temp, target='altitude_diff', item_id='station_id', 
+                    y_temp[target_feature] = scaler.transform(y_temp[[target_feature]])
+                    y_temp = PandasDataset.from_long_dataframe(y_temp, target=target_feature, item_id='station_id', 
                                                                     timestamp='date', freq='D')
                     forecast = list(predictor.predict(y_temp))
                     forecast = scaler.inverse_transform([forecast[0].samples.mean(axis=0)])[0]
@@ -514,7 +514,7 @@ def hyperparameter_tuning(model_name,
     
     # Run the optuna
     study = optuna.create_study(direction='maximize')
-    study.optimize(objective, n_trials=30)
+    study.optimize(objective, n_trials=1)
 
     # Clean up parameter names by removing trailing numbers
     cleaned_params = {}
@@ -739,7 +739,7 @@ def final_training(model_name,
 
         elif model_name in ['n_beats_x', 'n_hits_multivariate']:
             # Rename the columns (library wants to have specific names)
-            y = y.rename(columns={'date':'ds', 'altitude_diff':'y', 'station_id':'unique_id'})
+            y = y.rename(columns={'date':'ds', target_feature:'y', 'station_id':'unique_id'})
             
             # Fit the models
             for i in range(horizon_max):
@@ -927,7 +927,7 @@ for name, settings in experiment_settings.items():
     # If the model is univariate, remove additional features
     if not multivariate:
         for aquifer in aquifer_by_stations.keys():
-            aquifer_by_stations[aquifer] = aquifer_by_stations[aquifer][['altitude_diff', 'date', 'station_id']]
+            aquifer_by_stations[aquifer] = aquifer_by_stations[aquifer][[settings['target_feature'], 'date', 'station_id']]
 
     # List of additional parameters
     if multivariate:

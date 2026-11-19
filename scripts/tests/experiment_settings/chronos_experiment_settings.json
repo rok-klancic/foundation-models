@@ -1,5 +1,5 @@
 {
-    "chronos": {
+    "chronos_bolt": {
         "model_name": "chronos",
         "additional_features": false,
         "test_len": 365,
